@@ -18,6 +18,20 @@ URL = "http://127.0.0.1:7860/"
 def main():
     which = sys.argv[1]
     png = sys.argv[2] if len(sys.argv) > 2 else None
+    if which == "login":  # examples/login (admin / secret)
+        from gradio_client.exceptions import AuthenticationError
+        for bad in (None, ("admin", "nope")):
+            try:
+                Client(URL, verbose=False, auth=bad)
+                raise AssertionError(f"auth={bad} should be refused")
+            except (AuthenticationError, ValueError) as e:
+                pass
+        c = Client(URL, verbose=False, auth=("admin", "secret"))
+        r = c.predict("Hanako", api_name="/predict")
+        assert r == "Hello, Hanako!", r
+        print("login ok: no auth / wrong password refused;", r)
+        c.close()
+        return
     c = Client(URL, verbose=False, download_files=which not in ("llm", "llm2"))
     if which == "hello":
         r = c.predict("World", 3, api_name="/predict")

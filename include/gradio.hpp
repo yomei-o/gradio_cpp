@@ -884,10 +884,26 @@ struct EventOptions {
     bool show_api = true;
 };
 
+// Login check: return true to let (username, password) in.
+using AuthFn = std::function<bool(const std::string& username, const std::string& password)>;
+
+// A fixed list of users, compared in constant time: auth_users({{"admin", "secret"}})
+inline AuthFn auth_users(std::map<std::string, std::string> users) {
+    return [users = std::move(users)](const std::string& u, const std::string& pw) {
+        auto it = users.find(u);
+        const std::string& want = it != users.end() ? it->second : pw;
+        unsigned char diff = (unsigned char)(want.size() != pw.size());
+        for (size_t i = 0; i < want.size(); ++i) diff |= (unsigned char)(want[i] ^ (i < pw.size() ? pw[i] : 0));
+        return it != users.end() && diff == 0;
+    };
+}
+
 struct LaunchOptions {
     std::string host = "127.0.0.1";
     int port = 7860;
     bool auto_port = true;      // try the next ports if busy, like Gradio
+    AuthFn auth;                // like launch(auth=...): set to require a login
+    std::string auth_message;   // shown on the login page
 };
 
 // ---------------------------------------------------------------------------
@@ -1081,6 +1097,8 @@ public:
                 {"gradio_cpp_version", version},
                 {"protocol", "sse_v3"},
                 {"connect_heartbeat", false},
+                {"auth_required", (bool)auth_},
+                {"auth_message", auth_message_},
                 {"mode", mode_},
                 {"title", title_},
                 {"api_prefix", "/gradio_api"},
@@ -1111,8 +1129,29 @@ public:
         return {{"named_endpoints", named}, {"unnamed_endpoints", json::object()}};
     }
 
+    // Require a login (Gradio's auth=). Call before mount(); launch() does it from LaunchOptions.
+    void set_auth(AuthFn fn, std::string message = "") {
+        auth_ = std::move(fn);
+        auth_message_ = std::move(message);
+    }
+
+    // The user logged in with this request's cookie ("" when none / auth is off).
+    std::string user_of(const httplib::Request& req) const {
+        std::string cookie = req.get_header_value("Cookie"), key = cookie_name() + "=";
+        for (size_t pos = 0; (pos = cookie.find(key, pos)) != std::string::npos; pos += key.size()) {
+            if (pos > 0 && cookie[pos - 1] != ' ' && cookie[pos - 1] != ';') continue;
+            size_t end = cookie.find(';', pos);
+            std::string tok = cookie.substr(pos + key.size(), end == std::string::npos ? std::string::npos : end - pos - key.size());
+            std::lock_guard<std::mutex> lk(tokens_m_);
+            auto it = tokens_.find(tok);
+            if (it != tokens_.end()) return it->second;
+        }
+        return "";
+    }
+
     // Register all routes on an existing server.
     void mount(httplib::Server& svr) {
+        mount_auth(svr);
         svr.Get("/", [this](const httplib::Request&, httplib::Response& res) {
             res.set_content(frontend_html(), "text/html; charset=utf-8");
         });
@@ -1183,6 +1222,7 @@ public:
 
     void launch(LaunchOptions opt = {}) {
         httplib::Server svr;
+        if (opt.auth) set_auth(opt.auth, opt.auth_message);
         mount(svr);
         int port = opt.port;
         int last = opt.auto_port ? port + 99 : port;
@@ -1666,6 +1706,66 @@ private:
     std::vector<Dep> deps_;
     std::mutex events_m_;
     std::map<std::string, Event> events_;
+    std::string cookie_name() const { return "access-token-" + cookie_id_; }
+
+    void mount_auth(httplib::Server& svr) {
+        if (!auth_) return;
+        // Everything except the page itself and the login routes needs a login.
+        svr.set_pre_routing_handler([this](const httplib::Request& req, httplib::Response& res) {
+            static const std::set<std::string> open = {"/", "/login", "/login/", "/logout", "/login_check",
+                                                       "/login_check/", "/favicon.ico"};
+            if (open.count(req.path) || !user_of(req).empty()) return httplib::Server::HandlerResponse::Unhandled;
+            res.status = 401;
+            res.set_content(json{{"detail", {{"error", "Not authenticated"}, {"auth_message", auth_message_}}}}.dump(),
+                            "application/json");
+            return httplib::Server::HandlerResponse::Handled;
+        });
+        auto login = [this](const httplib::Request& req, httplib::Response& res) {
+            std::string u = req.get_param_value("username"), pw = req.get_param_value("password");
+            while (!u.empty() && std::isspace((unsigned char)u.back())) u.pop_back();
+            while (!u.empty() && std::isspace((unsigned char)u.front())) u.erase(0, 1);
+            if (u.empty() || !auth_(u, pw)) {
+                res.status = 400;
+                res.set_content(json{{"detail", "Incorrect credentials."}}.dump(), "application/json");
+                return;
+            }
+            std::string tok = detail::random_hex(32);
+            {
+                std::lock_guard<std::mutex> lk(tokens_m_);
+                tokens_[tok] = u;
+            }
+            res.set_header("Set-Cookie", cookie_name() + "=" + tok + "; Path=/; HttpOnly; SameSite=Lax");
+            res.set_content(json{{"success", true}}.dump(), "application/json");
+        };
+        svr.Post("/login", login);
+        svr.Post("/login/", login);
+        auto check = [this](const httplib::Request& req, httplib::Response& res) {
+            if (user_of(req).empty()) {
+                res.status = 401;
+                res.set_content(json{{"detail", {{"error", "Not authenticated"}, {"auth_message", auth_message_}}}}.dump(),
+                                "application/json");
+            } else {
+                res.set_content("null", "application/json");
+            }
+        };
+        svr.Get("/login_check", check);
+        svr.Get("/login_check/", check);
+        svr.Get("/logout", [this](const httplib::Request& req, httplib::Response& res) {
+            std::string u = user_of(req);
+            if (!u.empty()) {  // like Gradio: log this user out everywhere
+                std::lock_guard<std::mutex> lk(tokens_m_);
+                for (auto it = tokens_.begin(); it != tokens_.end();) it = it->second == u ? tokens_.erase(it) : std::next(it);
+            }
+            res.set_header("Set-Cookie", cookie_name() + "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+            res.set_redirect("/");
+        });
+    }
+
+    AuthFn auth_;
+    std::string auth_message_;
+    std::string cookie_id_ = detail::random_hex(12);
+    mutable std::mutex tokens_m_;
+    std::map<std::string, std::string> tokens_;  // token -> username
     std::mutex sessions_m_;
     std::map<std::string, std::shared_ptr<Session>> sessions_;
 };

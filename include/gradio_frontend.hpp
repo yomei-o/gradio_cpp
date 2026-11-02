@@ -83,6 +83,10 @@ footer a { color: var(--muted); cursor: pointer; }
 #api.open { display: block; }
 #api pre { background: var(--panel); border: 1px solid var(--border); padding: 10px; border-radius: 6px; overflow: auto; font-size: 13px; }
 .hidden { display: none !important; }
+.login { max-width: 360px; margin: 10vh auto 0; display: flex; flex-direction: column; gap: 12px; }
+.login h2 { margin: 0 0 4px; text-align: center; }
+.login .msg { color: var(--muted); text-align: center; white-space: pre-wrap; }
+.login .err { color: var(--error); min-height: 1.4em; text-align: center; }
 .ed-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
 .ed-tools .sw { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0; }
 .ed-tools .sw.sel { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
@@ -153,12 +157,12 @@ select { width: 100%; font: inherit; color: var(--text); background: var(--input
 .msg img { max-width: min(360px, 100%); max-height: 360px; border-radius: 6px; display: block; }
 .msg .md > :first-child { margin-top: 0; } .msg .md > :last-child { margin-bottom: 0; }
 .msg .meta { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
-.typing::after { content: "\2026"; animation: pulse 1s infinite; }
+.typing::after { conten)GRFE",
+        R"GRFE(t: "\2026"; animation: pulse 1s infinite; }
 .mm { display: flex; flex-direction: column; gap: 6px; }
 .mm .files { display: flex; flex-wrap: wrap; gap: 6px; }
 .mm .thumb { position: relative; width: 64px; height: 64px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
-  display: flex; a)GRFE",
-        R"GRFE(lign-items: center; justify-content: center; font-size: 11px; color: var(--muted); text-align: center; }
+  display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--muted); text-align: center; }
 .mm .thumb img { width: 100%; height: 100%; object-fit: cover; }
 .mm .thumb button { position: absolute; top: 1px; right: 1px; border: none; border-radius: 4px; padding: 0 5px; cursor: pointer;
   background: rgba(0,0,0,.55); color: #fff; font-size: 12px; }
@@ -374,14 +378,14 @@ const RENDER = {
     const ta = el("textarea", "", bar); ta.rows = 1; ta.placeholder = p.placeholder || "";
     const send = el("button", "icon send", bar); send.type = "button"; send.textContent = "↑"; send.title = "Send";
     let files = [];  // {value, pending, url, name, isImage}
-    const grow = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, 240) + "px"; };
+    const grow = () => { ta.style.height = "a)GRFE",
+        R"GRFE(uto"; ta.style.height = Math.min(ta.scrollHeight + 2, 240) + "px"; };
     const draw = () => {
       filesRow.innerHTML = "";
       files.forEach((f, i) => {
         const t = el("div", "thumb", filesRow);
         if (f.isImage) { const im = el("img", "", t); im.src = f.url; } else t.textContent = f.name;
-)GRFE",
-        R"GRFE(        const x = el("button", "", t); x.textContent = "×"; x.onclick = () => { files.splice(i, 1); draw(); };
+        const x = el("button", "", t); x.textContent = "×"; x.onclick = () => { files.splice(i, 1); draw(); };
       });
     };
     const add = list => {
@@ -585,12 +589,12 @@ function plot(c, parent) {
     if (xi < 0 || yi < 0) { box.textContent = `columns "${p.x}" / "${p.y}" not found`; return; }
     const svg = mk("svg", { viewBox: `0 0 ${W} ${H}`, class: "plot" }, box);
     const ys = v.data.map(r => Number(r[yi])), ymin = Math.min(0, ...ys), ymax = Math.max(...ys, ymin + 1e-9);
-    const sy = y => T + (H - T - B) * (1 - (y - ymin) / (ymax - ymin));
+    const sy = y )GRFE",
+        R"GRFE(=> T + (H - T - B) * (1 - (y - ymin) / (ymax - ymin));
     mk("line", { x1: L, y1: T, x2: L, y2: H - B, class: "axis" }, svg);
     mk("line", { x1: L, y1: H - B, x2: W - R, y2: H - B, class: "axis" }, svg);
     for (const t of [ymin, (ymin + ymax) / 2, ymax]) {
-      mk("text", { x: L - 6, y: sy(t) + 4, "t)GRFE",
-        R"GRFE(ext-anchor": "end" }, svg).textContent = +t.toPrecision(4);
+      mk("text", { x: L - 6, y: sy(t) + 4, "text-anchor": "end" }, svg).textContent = +t.toPrecision(4);
     }
     if (type === "bar") {
       const n = v.data.length, bw = (W - L - R) / n;
@@ -751,14 +755,14 @@ function fileLike(c, parent, kind) {
   const p = c.props, b = block(c, parent), ev = emitter(c.id);
   const drop = el("div", "drop" + (p.interactive ? "" : " static"), b);
   let value = null, pending = null;
-  const picker = el("input", "", b); picker.type = "file"; picker.hidden = true;
+  const picker = el("input", "", b); picker.type = "file"; picker.hidden = true;)GRFE",
+        R"GRFE(
   if (kind !== "file") picker.accept = kind + "/*";
   const show = (v, localUrl) => {
     drop.innerHTML = "";
     if (!v) { drop.textContent = p.interactive ? `Drop ${kind[0].toUpperCase() + kind.slice(1)} Here\n- or -\nClick to Upload` : "";
       drop.style.whiteSpace = "pre-line"; return; }
-    if (is)GRFE",
-        R"GRFE(Image) { const img = el("img", "", drop); img.src = localUrl || v.url; img.alt = v.orig_name || ""; }
+    if (isImage) { const img = el("img", "", drop); img.src = localUrl || v.url; img.alt = v.orig_name || ""; }
     else if (kind === "audio" || kind === "video") { const m = el(kind, "", drop); m.controls = true; m.src = localUrl || v.url; m.onclick = e => e.stopPropagation(); }
     else { const a = el("a", "filelink", drop); a.href = localUrl || v.url; a.download = v.orig_name || "";
       a.textContent = (v.orig_name || "file") + (v.size != null ? `  (${(v.size / 1024).toFixed(1)} KB)` : ""); a.onclick = e => e.stopPropagation(); }
@@ -994,8 +998,36 @@ function apiDocs() {
   });
 }
 
+function loginPage(detail) {
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  const f = el("form", "login block", app);
+  el("h2", "", f).textContent = "Login";
+  if (detail && detail.auth_message) el("div", "msg", f).textContent = detail.auth_message;
+  const u = el("input", "", f); u.type = "text"; u.name = "user)GRFE",
+        R"GRFE(name"; u.placeholder = "username"; u.autocomplete = "username";
+  const pw = el("input", "", f); pw.type = "password"; pw.name = "password"; pw.placeholder = "password"; pw.autocomplete = "current-password";
+  pw.style.cssText = "width:100%;font:inherit;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--input);color:var(--text)";
+  const err = el("div", "err", f);
+  const btn = el("button", "btn primary", f); btn.type = "submit"; btn.textContent = "Login";
+  f.onsubmit = async e => {
+    e.preventDefault(); err.textContent = "";
+    const r = await fetch("login", { method: "POST", body: new URLSearchParams({ username: u.value, password: pw.value }) });
+    if (r.ok) location.reload();
+    else err.textContent = (await r.json().catch(() => ({}))).detail || "Login failed";
+  };
+  u.focus();
+  document.querySelector("footer").classList.add("hidden");
+}
+
 async function main() {
-  CFG = await (await fetch("config")).json();
+  const rc = await fetch("config");
+  if (rc.status === 401) { loginPage((await rc.json().catch(() => ({}))).detail); return; }
+  CFG = await rc.json();
+  if (CFG.auth_required) {
+    const f = document.querySelector("footer"), a = document.createElement("a");
+    a.href = "logout"; a.textContent = "Logout"; f.append(" · ", a);
+  }
   document.title = CFG.title || "Gradio";
   const byId = Object.fromEntries(CFG.components.map(c => [c.id, c]));
   Object.assign(CBY, byId);

@@ -81,6 +81,21 @@ llama.cpp は b12032 で確認した。
 | エラー | `throw gr::Error("...")` でブラウザにトースト表示 |
 | 同時実行 | イベントごとに `concurrency_limit`（既定 1、Gradio と同じ） |
 
+## ログイン（本家の `launch(auth=...)`）
+
+```cpp
+gr::LaunchOptions opt;
+opt.auth = gr::auth_users({{"admin", "secret"}});   // または (user, password) -> bool の関数
+opt.auth_message = "Log in to use this demo.";
+demo.launch(opt);
+```
+
+ログインしていないとログイン画面が出る。`/config` や `/gradio_api/...`、ファイルは 401 になる。
+本家と同じく `POST /login`（フォームの username / password）、`/logout`、`/login_check` があり、
+gradio_client なら `Client(url, auth=("admin", "secret"))` でそのまま入れる。
+セッションは HttpOnly の Cookie で持つ。HTTP のままだとパスワードと Cookie は平文で流れるので、
+外に公開するときは HTTPS のリバースプロキシの後ろに置くこと。
+
 ## HTTP API（Gradio と同じパス）
 
 | | |
@@ -142,6 +157,7 @@ MSVC では `/utf-8 /bigobj` を付ける（CMake の `gradio_cpp` ターゲッ�
 * `examples/extras.cpp` — State / Progress / Examples / Code / Dataframe / Label / Audio
 * `examples/vision.cpp` — Webcam / アップロード → AnnotatedImage（枠）＋ LinePlot ＋ BarPlot
 * `examples/studio.cpp` — ImageEditor / Model3D（トーラス生成）/ ScatterPlot
+* `examples/login.cpp` — ログインが必要なアプリ（`--user` / `--password`）
 * `examples/chat_echo.cpp` — LLM なしの ChatInterface（受け取ったものを返す）
 * `examples/llama_chat.cpp` — llama-server につなぐ画像付きチャット
 * `examples/llama_local.cpp` — llama.cpp（libmtmd）を直接リンクした画像付きチャット（`-DGRADIO_LLAMA_CPP=...` のときだけビルド）

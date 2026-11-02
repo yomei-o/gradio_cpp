@@ -92,7 +92,14 @@
 * `Blocks::on_raw`：型なしハンドラ（引数は json の配列）。
 * run_all：e2e 11本＋gradio_client 8本 PASS。
 
+2026-11-02 v0.10（認証）
+* `LaunchOptions::auth`（`gr::auth_users(map)` は定数時間比較）。httplib の pre-routing handler で、
+  `/`・`/login`・`/logout`・`/login_check` 以外は未ログインなら 401。本家と同じく、失敗した /login は 400、
+  Cookie 名は `access-token-<起動ごとの乱数>`、logout はそのユーザーのトークンを全部消す。
+* `/config` に `auth_required` と `auth_message`。フロントは /config が 401 ならログイン画面を出す。
+* curl（401 / 400 / Cookie 付きで 200）、e2e login、gradio_client の `auth=`（無し・誤りは拒否）を確認。run_all 21本 PASS。
+
 ## 次にやること
 
-1. 認証（本家の `launch(auth=...)` 相当、`/login`、Cookie、gradio_client の `auth=`）。
+1. ハンドラからログイン中のユーザー名を見られるように（本家の gr.Request.username 相当）。
 2. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

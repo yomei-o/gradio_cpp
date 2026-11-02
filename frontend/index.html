@@ -76,6 +76,10 @@ footer a { color: var(--muted); cursor: pointer; }
 #api.open { display: block; }
 #api pre { background: var(--panel); border: 1px solid var(--border); padding: 10px; border-radius: 6px; overflow: auto; font-size: 13px; }
 .hidden { display: none !important; }
+.login { max-width: 360px; margin: 10vh auto 0; display: flex; flex-direction: column; gap: 12px; }
+.login h2 { margin: 0 0 4px; text-align: center; }
+.login .msg { color: var(--muted); text-align: center; white-space: pre-wrap; }
+.login .err { color: var(--error); min-height: 1.4em; text-align: center; }
 .ed-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
 .ed-tools .sw { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0; }
 .ed-tools .sw.sel { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
@@ -983,8 +987,35 @@ function apiDocs() {
   });
 }
 
+function loginPage(detail) {
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  const f = el("form", "login block", app);
+  el("h2", "", f).textContent = "Login";
+  if (detail && detail.auth_message) el("div", "msg", f).textContent = detail.auth_message;
+  const u = el("input", "", f); u.type = "text"; u.name = "username"; u.placeholder = "username"; u.autocomplete = "username";
+  const pw = el("input", "", f); pw.type = "password"; pw.name = "password"; pw.placeholder = "password"; pw.autocomplete = "current-password";
+  pw.style.cssText = "width:100%;font:inherit;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--input);color:var(--text)";
+  const err = el("div", "err", f);
+  const btn = el("button", "btn primary", f); btn.type = "submit"; btn.textContent = "Login";
+  f.onsubmit = async e => {
+    e.preventDefault(); err.textContent = "";
+    const r = await fetch("login", { method: "POST", body: new URLSearchParams({ username: u.value, password: pw.value }) });
+    if (r.ok) location.reload();
+    else err.textContent = (await r.json().catch(() => ({}))).detail || "Login failed";
+  };
+  u.focus();
+  document.querySelector("footer").classList.add("hidden");
+}
+
 async function main() {
-  CFG = await (await fetch("config")).json();
+  const rc = await fetch("config");
+  if (rc.status === 401) { loginPage((await rc.json().catch(() => ({}))).detail); return; }
+  CFG = await rc.json();
+  if (CFG.auth_required) {
+    const f = document.querySelector("footer"), a = document.createElement("a");
+    a.href = "logout"; a.textContent = "Logout"; f.append(" · ", a);
+  }
   document.title = CFG.title || "Gradio";
   const byId = Object.fromEntries(CFG.components.map(c => [c.id, c]));
   Object.assign(CBY, byId);
