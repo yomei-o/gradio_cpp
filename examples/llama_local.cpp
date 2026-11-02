@@ -126,10 +126,7 @@ public:
             throw gr::Error("mtmd_tokenize failed (" + std::to_string(r) + ")");
         if (mtmd_helper_get_n_tokens(chunks.get()) + 16 > llama_n_ctx(ctx_))
             throw gr::Error("conversation too long for the context; press Clear");
-        llama_memory_clear(llama_get_memory(ctx_), true);
-        llama_pos n_past = 0;
-        if (mtmd_helper_eval_chunks(mtmd_, ctx_, chunks.get(), 0, 0, 2048, true, &n_past))
-            throw gr::Error("failed to evaluate the prompt");
+        llama_pos n_past = eval_prompt(chunks.get());
 
         // 4. sample
         auto sp = llama_sampler_chain_default_params();
@@ -163,12 +160,126 @@ public:
             batch.n_seq_id[0] = 1;
             batch.seq_id[0][0] = 0;
             batch.logits[0] = 1;
-            if (llama_decode(ctx_, batch)) throw gr::Error("llama_decode failed");
+            if (llama_decode(ctx_, batch)) {
+                reset_cache();
+                throw gr::Error("llama_decode failed");
+            }
+            cache_.push_back({tok, {}, 1});  // the reply stays in the KV cache for the next turn
         }
         return text;
     }
 
 private:
+    // What KV-cache sequence 0 holds, in order: one unit per text token or per image.
+    struct Unit {
+        llama_token tok;
+        std::string image_id;  // non-empty for an image
+        llama_pos n_pos;
+        bool operator==(const Unit& o) const { return tok == o.tok && image_id == o.image_id && n_pos == o.n_pos; }
+    };
+    std::vector<Unit> cache_;
+
+    void reset_cache() {
+        cache_.clear();
+        llama_memory_clear(llama_get_memory(ctx_), true);
+    }
+
+    static std::vector<Unit> units_of(const mtmd_input_chunk* c) {
+        std::vector<Unit> u;
+        if (mtmd_input_chunk_get_type(c) == MTMD_INPUT_CHUNK_TYPE_TEXT) {
+            size_t n = 0;
+            const llama_token* t = mtmd_input_chunk_get_tokens_text(c, &n);
+            for (size_t i = 0; i < n; ++i) u.push_back({t[i], {}, 1});
+        } else {
+            const char* id = mtmd_input_chunk_get_id(c);
+            u.push_back({-1, std::string("img:") + (id ? id : "?"), mtmd_input_chunk_get_n_pos(c)});
+        }
+        return u;
+    }
+
+    // Evaluate the prompt, keeping whatever prefix the KV cache already holds (the
+    // earlier turns, their images and the replies generated for them).
+    llama_pos eval_prompt(const mtmd_input_chunks* chunks) {
+        auto t0 = std::chrono::steady_clock::now();
+        size_t n_chunks = mtmd_input_chunks_size(chunks);
+        std::vector<std::vector<Unit>> units(n_chunks);
+        size_t total = 0;
+        for (size_t i = 0; i < n_chunks; ++i) {
+            units[i] = units_of(mtmd_input_chunks_get(chunks, i));
+            total += units[i].size();
+        }
+        // longest common prefix, in units; always leave something to evaluate for logits
+        size_t keep = 0;
+        bool diverged = false;
+        for (size_t i = 0; i < n_chunks && !diverged; ++i)
+            for (auto& u : units[i]) {
+                if (keep < cache_.size() && cache_[keep] == u) {
+                    ++keep;
+                } else {
+                    diverged = true;
+                    break;
+                }
+            }
+        if (keep >= total) keep = total - 1;
+        // an image is all or nothing: do not stop inside one
+        llama_pos keep_pos = 0;
+        for (size_t k = 0; k < keep; ++k) keep_pos += cache_[k].n_pos;
+        cache_.resize(keep);
+        if (!llama_memory_seq_rm(llama_get_memory(ctx_), 0, keep_pos, -1)) {
+            reset_cache();
+            keep = 0;
+            keep_pos = 0;
+        }
+
+        llama_pos n_past = keep_pos;
+        size_t seen = 0, evaluated = 0;
+        try {
+            for (size_t i = 0; i < n_chunks; ++i) {
+                const mtmd_input_chunk* c = mtmd_input_chunks_get(chunks, i);
+                bool last = i + 1 == n_chunks;
+                size_t n = units[i].size();
+                if (seen + n <= keep) {  // entirely cached
+                    seen += n;
+                    continue;
+                }
+                size_t skip = keep > seen ? keep - seen : 0;
+                if (mtmd_input_chunk_get_type(c) != MTMD_INPUT_CHUNK_TYPE_TEXT || skip == 0) {
+                    if (mtmd_helper_eval_chunk_single(mtmd_, ctx_, c, n_past, 0, 2048, last, &n_past))
+                        throw gr::Error("failed to evaluate the prompt");
+                } else {  // text chunk with a cached head: decode only its tail
+                    size_t nt = 0;
+                    const llama_token* toks = mtmd_input_chunk_get_tokens_text(c, &nt);
+                    for (size_t s = skip; s < nt; s += 2048) {
+                        int m = (int)std::min<size_t>(2048, nt - s);
+                        llama_batch b = llama_batch_init(m, 0, 1);
+                        for (int j = 0; j < m; ++j) {
+                            b.token[j] = toks[s + j];
+                            b.pos[j] = n_past + j;
+                            b.n_seq_id[j] = 1;
+                            b.seq_id[j][0] = 0;
+                            b.logits[j] = last && s + j + 1 == nt;
+                        }
+                        b.n_tokens = m;
+                        int r = llama_decode(ctx_, b);
+                        llama_batch_free(b);
+                        if (r) throw gr::Error("failed to evaluate the prompt");
+                        n_past += m;
+                    }
+                }
+                for (size_t j = skip; j < n; ++j) cache_.push_back(units[i][j]);
+                evaluated += n - skip;
+                seen += n;
+            }
+        } catch (...) {
+            reset_cache();
+            throw;
+        }
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        std::cerr << "prompt: reused " << keep << " / " << total << " units, evaluated " << evaluated << " in " << ms
+                  << " ms" << std::endl;
+        return n_past;
+    }
+
     Options opt_;
     llama_model* model_ = nullptr;
     llama_context* ctx_ = nullptr;

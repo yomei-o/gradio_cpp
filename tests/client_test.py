@@ -18,7 +18,7 @@ URL = "http://127.0.0.1:7860/"
 def main():
     which = sys.argv[1]
     png = sys.argv[2] if len(sys.argv) > 2 else None
-    c = Client(URL, verbose=False, download_files=False if which == "llm" else True)
+    c = Client(URL, verbose=False, download_files=which not in ("llm", "llm2"))
     if which == "hello":
         r = c.predict("World", 3, api_name="/predict")
         assert r == "Hello, World!!!", r
@@ -69,6 +69,19 @@ def main():
         r = job.result()
         assert r.strip(), r
         print(f"llm ok ({len(parts)} streamed updates):", r)
+    elif which == "llm2":  # two turns through the UI event (fn_index 0), so history is sent back
+        t0 = time.time()
+        _, hist = c.predict({"text": "Describe this image in one sentence.", "files": [handle_file(png)]}, [],
+                            fn_index=0)
+        t1 = time.time()
+        _, hist = c.predict({"text": "What color is the background?", "files": []}, hist, fn_index=0)
+        t2 = time.time()
+        roles = [m["role"] for m in hist]
+        assert roles == ["user", "user", "assistant", "user", "assistant"], roles
+        assert hist[-1]["content"].strip(), hist
+        print(f"llm2 ok: turn1 {t1 - t0:.1f}s, turn2 {t2 - t1:.1f}s")
+        for m in hist:
+            print("  ", m["role"], ":", m["content"] if isinstance(m["content"], str) else "[image]")
     else:
         raise SystemExit("unknown test " + which)
     c.close()

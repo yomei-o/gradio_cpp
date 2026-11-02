@@ -58,6 +58,14 @@
   VS 付属の cmake を使う。SmolVLM2-500M で、gradio_client から画像付きの /chat を呼び、ストリーミングで答えが返った
   （「The background is blue.」など）。ブラウザでの確認は、同じ ChatInterface の llama_chat で済ませている。
 
+2026-11-02 v0.6（KV キャッシュ再利用）
+* llama_local：KV の中身を Unit（テキストのトークン1個、または画像1枚。画像は mtmd の chunk id
+  ＝内容の SHA-256 と n_pos）の列で覚え、新しいプロンプトとの共通接頭辞を残して `llama_memory_seq_rm`。
+  テキスト chunk の途中から一致しなくなった場合は、残りのトークンだけを自前の batch で decode する。
+  生成した返事のトークンも列に積む。
+* client_test.py の llm2（UI のイベント fn_index=0 に history を渡して2ターン）：2ターン目は
+  reused 41 / 71、評価 107ms（1ターン目は 5580ms）。
+
 ## 次にやること
 
 1. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

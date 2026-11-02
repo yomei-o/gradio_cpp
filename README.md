@@ -51,7 +51,9 @@ build/Release/llama_local.exe -m SmolVLM2-500M-Video-Instruct-Q8_0.gguf --mmproj
 
 `examples/llama_local.cpp` は libllama と libmtmd を直接呼ぶ。チャットテンプレートはモデルのものを使い、
 画像は `mtmd_helper_bitmap_init_from_buf` で読み込み、トークンが出るたびにストリーミングで返す。
-毎ターン会話全体を評価し直す（コードが短く、Clear や Stop で履歴が変わっても状態がずれない）。
+KV キャッシュの中身（テキストのトークンと画像の ID）を覚えておき、新しいプロンプトと先頭から一致する部分は評価し直さない。
+画像付き会話の2ターン目で、プロンプト評価は 5580ms → 107ms（SmolVLM2-500M、CPU 8スレッド）。
+Clear や Stop で履歴が変わったときは、一致しなくなった位置から先だけを捨てて評価し直す。
 llama.cpp は b12032 で確認した。
 
 ## できること
