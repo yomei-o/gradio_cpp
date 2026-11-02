@@ -27,6 +27,8 @@ run blocks -- $E2E blocks "$OUT"
 run components -- $E2E components "$OUT"
 run hello -- $E2E hello
 run extras -- $E2E extras "$OUT"
+run extras -- $E2E mic
+run vision -- $E2E vision "$OUT"
 run chat_echo -- $E2E echo "$PNG" "$OUT"
 run chat_echo -- $E2E stop
 
@@ -44,6 +46,7 @@ if [ -n "${GC_PYTHON:-}" ]; then
   run sepia -- $GC sepia "$PNG"
   run components -- $GC components
   run extras -- $GC extras
+  run vision -- $GC vision "$PNG"
   run chat_echo -- $GC chat "$PNG"
 fi
 exit $fail

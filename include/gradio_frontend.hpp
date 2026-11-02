@@ -83,6 +83,20 @@ footer a { color: var(--muted); cursor: pointer; }
 #api.open { display: block; }
 #api pre { background: var(--panel); border: 1px solid var(--border); padding: 10px; border-radius: 6px; overflow: auto; font-size: 13px; }
 .hidden { display: none !important; }
+.ann { position: relative; display: inline-block; max-width: 100%; }
+.ann img { display: block; max-width: 100%; max-height: 520px; }
+.ann img.ov { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transition: opacity .15s; pointer-events: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.legend span { font-size: 12px; padding: 2px 8px; border-radius: 10px; color: #fff; cursor: default; }
+.srcbar { display: flex; gap: 6px; }
+.srcbar button { font: inherit; font-size: 13px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--secondary); color: var(--text); cursor: pointer; }
+.srcbar button.sel { border-color: var(--primary); color: var(--primary); }
+.cam { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.cam video { max-width: 100%; max-height: 360px; border-radius: 6px; background: #000; }
+.rec { color: var(--error); font-weight: 600; }
+svg.plot { width: 100%; height: auto; display: block; }
+svg.plot text { fill: var(--muted); font-size: 11px; }
+svg.plot .axis { stroke: var(--border); }
 textarea.code { font: 13px/1.45 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre; tab-size: 4; }
 .drop audio, .drop video { width: 100%; max-height: 420px; }
 .lbl-top { font-size: 26px; font-weight: 700; text-align: center; padding: 6px 0 10px; }
@@ -152,7 +166,8 @@ select { width: 100%; font: inherit; color: var(--text); background: var(--input
 <script>
 "use strict";
 const el = (tag, cls, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; };
-const comps = {};    // id -> {get, set, reset, on, loading}
+const comps = {};   )GRFE",
+        R"GRFE( // id -> {get, set, reset, on, loading}
 let CFG = null;
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
@@ -169,8 +184,7 @@ function markdown(src) {
     if (list) { out.push("<ul>" + list.map(i => "<li>" + inline(i) + "</li>").join("") + "</ul>"); list = null; } };
   for (const line of String(src ?? "").split("\n")) {
     if (code !== null) { if (line.startsWith("```")) { out.push("<pre><code>" + escapeHtml(code.join("\n")) + "</code></pre>"); code = null; } else code.push(line); continue; }
-    i)GRFE",
-        R"GRFE(f (line.startsWith("```")) { flush(); code = []; continue; }
+    if (line.startsWith("```")) { flush(); code = []; continue; }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
     const li = line.match(/^\s*(?:[-*]|\d+[.)])\s+(.*)$/);
@@ -380,7 +394,8 @@ const RENDER = {
     attach.onclick = () => picker.click();
     picker.onchange = () => { add(picker.files); picker.value = ""; };
     send.onclick = () => ev.fire("submit");
-    ta.addEventListener("input", () => { grow(); ev.fire("change"); });
+    ta.addEventLis)GRFE",
+        R"GRFE(tener("input", () => { grow(); ev.fire("change"); });
     ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ev.fire("submit"); } });
     ta.addEventListener("paste", e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); add(fs); } });
     wrap.ondragover = e => { e.preventDefault(); wrap.classList.add("over"); };
@@ -395,8 +410,7 @@ const RENDER = {
     const fill = () => {
       sel.innerHTML = "";
       if (!p.multiselect) { const o = el("option", "", sel); o.value = ""; o.textContent = ""; o.dataset.none = "1"; }
-      for (const [label, value] of p.choices || []) { const)GRFE",
-        R"GRFE( o = el("option", "", sel); o.value = JSON.stringify(value); o.textContent = label; }
+      for (const [label, value] of p.choices || []) { const o = el("option", "", sel); o.value = JSON.stringify(value); o.textContent = label; }
     };
     const get = () => p.multiselect ? [...sel.selectedOptions].map(o => JSON.parse(o.value))
       : (sel.value === "" ? null : JSON.parse(sel.value));
@@ -506,6 +520,30 @@ const RENDER = {
     });
     return { get: () => null, set: () => {}, reset: () => {}, on: ev.on, loading: () => {} };
   },
+  annotatedimage(c, parent) {
+    const p = c.props, b = block(c, parent), box = el("div", "", b);
+    let val = null;
+    const set = v => {
+      val = v; box.innerHTML = "";
+      if (!v || !v.image) return;
+      const wrap = el("div", "ann", box); el("img", "", wrap).src = v.image.url;
+      const byLabel = {};
+      for (const a of v.annotations || []) {
+        const im = el("img", "ov", wrap); im.src = a.image.url;
+        (byLabel[a.label] ??= []).push(im);
+      }
+      const lg = el("div", "legend", box), pal = ["#ff6347", "#1e90ff", "#32cd32", "#ffa500", "#ba55d3", "#00ced1", "#ff1493", "#9acd32", "#ffd700", "#6495ed"];
+      Object.keys(byLabel).forEach((l, i) => {
+        const sp = el("span", "", lg); sp.textContent = `${l} (${byLabel[l].length})`; sp.style.background = pal[i % pal.length];
+        sp.onmouseenter = () => Object.entries(byLabel).forEach(([k, ims]) => ims.forEach(im => im.style.opacity = k === l ? 1 : 0.1));
+        sp.onmouseleave = () => Object.values(byLabel).flat().forEach(im => im.style.opacity = 1);
+      });
+    };
+    set(p.value);
+    return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
+  },
+  lineplot(c, parent) { return plot(c, parent, "line"); },
+  barplot(c, parent) { return plot(c, parent, "bar"); },
   button(c, parent) {
     const p = c.props, btn = el("button", "btn " + (p.variant || "secondary"), parent), ev = emitter(c.id);
     btn.textContent = p.value; if (p.visible === false) btn.classList.add("hidden");
@@ -519,6 +557,53 @@ const RENDER = {
     return { get: () => p.value, set: v => btn.textContent = v, reset: () => {}, on: ev.on, loading: () => {} };
   },
 };
+
+// Minimal SVG charts over a {headers, data} value.
+function plot(c, parent, type) {
+  const p = c.props, b = block(c, parent), box = el("div", "", b);
+  const NS = "http://www.w3.org/2000/svg", W = 640, H = 300, L = 48, R = 12, T = 12, B = 34;
+  const mk = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; };
+  const pal = ["#f97316", "#3b82f6", "#22c55e", "#a855f7", "#ef4444", "#14b8a6", "#eab308"];
+  let val = null;
+  const set = v => {
+    val = v; box.innerHTML = "";
+    if (!v || !v.data || !v.data.length) return;
+    const hi = n => v.headers.indexOf(n), xi = hi(p.x), yi = hi(p.y), ci = p.color ? hi(p.color) : -1;
+    if (xi < 0 || yi < 0) { box.textContent = `columns "${p.x}" / "${p.y}" not found`; return; }
+    const svg = mk("svg", { viewBox: `0 0 ${W} ${H}`, class: "plot" }, box);
+    const ys = v.data.map(r => Number(r[yi])), ymin = Math.min(0, ...ys), ymax = Math.max(...ys, ymin + 1e-9);
+    const sy = y => T + (H - T - B) * (1 - (y - ymin) / (ymax - ymin));
+    mk("line", { x1: L, y1: T, x2: L, y2: H - B, class: "axis" }, svg);
+    mk("line", { x1: L, y1: H - B, x2: W - R, y2: H - B, class: "axis" }, svg);
+    for (const t of [ymin, (ymin + ymax) / 2, ymax]) {
+      mk("text", { x: L - 6, y: sy(t) + 4, "text-anchor": "end" }, svg).textContent = +t.toPrecision(4);
+    }
+    if (type === "bar") {
+      const n = v.data.length, bw = (W - L - R) / n;
+      v.data.forEach((r, i) => {
+        const y = Number(r[yi]);
+        mk("rect", { x: L + i * bw + bw * 0.15, width: bw * 0.7, y: Math.min(sy(y), sy(0)), height: Math.abs(sy(0) - sy(y)), fill: pal[0], rx: 2 }, svg);
+        mk("text", { x: L + (i + 0.5) * bw, y: H - B + 16, "text-anchor": "middle" }, svg).textContent = r[xi];
+      });
+    } else {
+      const numeric = v.data.every(r => typeof r[xi] === "number");
+      const xs = v.data.map((r, i) => numeric ? r[xi] : i), xmin = Math.min(...xs), xmax = Math.max(...xs, xmin + 1e-9);
+      const sx = x => L + (W - L - R) * (x - xmin) / (xmax - xmin);
+      const groups = {};
+      v.data.forEach((r, i) => (groups[ci >= 0 ? r[ci] : ""] ??= []).push([xs[i], Number(r[yi])]));
+      Object.entries(groups).forEach(([g, pts], k) => {
+        mk("polyline", { points: pts.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "), fill: "none", stroke: pal[k % pal.length], "stroke-width": 2 }, svg);
+        if (g) mk("text", { x: W - R, y: T + 12 + 14 * k, "text-anchor": "end", fill: pal[k % pal.length] }, svg).textContent = g;
+      });
+      for (const [x, i] of [[xmin, 0], [xmax, v.data.l)GRFE",
+        R"GRFE(ength - 1]])
+        mk("text", { x: sx(x), y: H - B + 16, "text-anchor": "middle" }, svg).textContent = numeric ? +x.toPrecision(4) : v.data[i][xi];
+    }
+    mk("text", { x: (L + W - R) / 2, y: H - 4, "text-anchor": "middle" }, svg).textContent = p.x;
+  };
+  set(p.value);
+  return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
+}
 
 function choiceGroup(c, parent, multi) {
   const p = c.props, b = block(c, parent), ev = emitter(c.id), box = el("div", "choices", b);
@@ -560,6 +645,46 @@ function fileLike(c, parent, kind) {
     pending = upload(file).then(v => { value = v; pending = null; ev.fire("upload"); ev.fire("change"); return v; })
       .catch(e => { toast("Error", e.message); set(null); return null; });
   };
+  const sources = p.sources || ["upload"];
+  const live = p.interactive && ((kind === "image" && sources.includes("webcam")) || (kind === "audio" && sources.includes("microphone")));
+  if (live) {
+    const bar = el("div", "srcbar", b), up = el("button", "sel", bar), lv = el("button", "", bar);
+    up.type = lv.type = "button"; up.textContent = "Upload"; lv.textContent = kind === "image" ? "Webcam" : "Microphone";
+    const pane = el("div", "cam hidden", b);
+    let stream = null, rec = null;
+    const stop = () => { stream?.getTracks().forEach(t => t.stop()); stream = null; };
+    const mode = m => {
+      up.classList.toggle("sel", m === "up"); lv.classList.toggle("sel", m === "live");
+      drop.classList.toggle("hidden", m === "live"); pane.classList.toggle("hidden", m !== "live");
+      if (m !== "live") { stop(); pane.innerHTML = ""; return; }
+      pane.innerHTML = "";
+      const act = el("button", "btn", pane); act.type = "button";
+      if (kind === "image") {
+        const v = el("video", "", pane); v.autoplay = true; v.muted = true; v.playsInline = true;
+        pane.insertBefore(v, act); act.textContent = "Capture";
+        navigator.mediaDevices.getUserMedia({ video: true }).then(st => { stream = st; v.srcObject = st; })
+          .catch(e => { toast("Error", "camera: " + e.message); mode("up"); });
+        act.onclick = () => {
+          const cv = document.createElement("canvas"); cv.width = v.videoWidth; cv.height = v.videoHeight;
+          cv.getContext("2d").drawImage(v, 0, 0);
+          cv.toBlob(bl => { mode("up"); take(new File([bl], "webcam.png", { type: "image/png" })); }, "image/png");
+        };
+      } else {
+        const st = el("span", "", pane); act.textContent = "Record";
+        act.onclick = async () => {
+          if (rec) { rec.stop(); return; }
+          try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+          catch (e) { toast("Error", "microphone: " + e.message); return; }
+          const chunks = []; rec = new MediaRecorder(stream);
+          rec.ondataavailable = e => chunks.push(e.data);
+          rec.onstop = () => { const type = rec.mimeType || "audio/webm"; rec = null; stop(); mode("up");
+            take(new File([new Blob(chunks, { type })], "recording." + (type.includes("ogg") ? "ogg" : "webm"), { type })); };
+          rec.start(); act.textContent = "Stop"; st.className = "rec"; st.textContent = "● recording";
+        };
+      }
+    };
+    up.onclick = () => mode("up"); lv.onclick = () => mode("live");
+  }
   if (p.interactive) {
     drop.onclick = () => picker.click();
     picker.onchange = () => { take(picker.files[0]); picker.value = ""; };
@@ -616,8 +741,7 @@ function build(node, parent, byId) {
   }
 }
 
-// Apply a gr.update dict: visible/value in place, anything else re-rende)GRFE",
-        R"GRFE(rs the component.
+// Apply a gr.update dict: visible/value in place, anything else re-renders the component.
 function applyUpdate(id, u) {
   const c = CBY[id]; if (!c) return;
   const { __type__, ...props } = u;
@@ -720,7 +844,8 @@ async function run(dep) {
     if (next.trigger_after === dep.id && (ok || !next.trigger_only_on_success)) run(next);
 }
 
-function apiDocs() {
+function ap)GRFE",
+        R"GRFE(iDocs() {
   const box = document.getElementById("api");
   if (box.dataset.ready) { box.classList.toggle("open"); return; }
   box.className = "open"; box.dataset.ready = "1";

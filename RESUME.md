@@ -75,6 +75,13 @@
   （同じセッションの並行イベントで競合しないよう、コピーで渡して後でマージする）。
 * run_all：e2e 9本＋gradio_client 6本、計15本（LLM 本物を除く14本）PASS。
 
+2026-11-02 v0.8（画像系）
+* AnnotatedImage（`gradio_image.hpp` の AnnotatedImageValue。注釈1つずつ RGBA の重ね PNG を作る＝Gradio と同じ形式）、
+  LinePlot / BarPlot（DataFrame を SVG で。Gradio の plot 形式とは互換でない：独自）、
+  Image の Webcam、Audio の Microphone（MediaRecorder → webm をアップロード）。
+* e2e は Chromium のフェイクデバイス（`--use-fake-device-for-media-stream`）で、カメラ撮影と録音まで通す。
+* run_all：e2e 10本＋gradio_client 7本 PASS。
+
 ## 次にやること
 
 1. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

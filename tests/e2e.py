@@ -70,7 +70,8 @@ def main():
     which = sys.argv[1]
     errors = []
     with sync_playwright() as p:
-        b = p.chromium.launch()
+        # fake camera / microphone for the webcam and recording tests
+        b = p.chromium.launch(args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"])
         page = b.new_page(viewport={"width": 1280, "height": 800})
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(URL)
@@ -166,6 +167,30 @@ def main():
             page.wait_for_function("[...document.querySelectorAll('input[type=number]')].some(i => Number(i.value) > 10)")
             page.screenshot(path=str(out / "e2e_extras.png"), full_page=True)
             print("extras ok: state=3, progress shown as", repr(prog_text), ", label=Python")
+        elif which == "vision":  # webcam capture -> AnnotatedImage + plots
+            out = Path(sys.argv[2] if len(sys.argv) > 2 else ".")
+            page.get_by_role("button", name="Webcam").click()
+            page.wait_for_function("document.querySelector('.cam video')?.videoWidth > 0", timeout=15000)
+            page.get_by_role("button", name="Capture").click()
+            page.wait_for_selector(".drop img")
+            page.wait_for_timeout(500)
+            page.get_by_role("button", name="Submit").click()
+            page.wait_for_function("document.querySelectorAll('.ann img.ov').length === 5", timeout=15000)
+            page.wait_for_function("document.querySelector('svg.plot polyline') && document.querySelectorAll('svg.plot rect').length === 4")
+            legend = page.locator(".legend span").all_text_contents()
+            page.screenshot(path=str(out / "e2e_vision.png"), full_page=True)
+            assert legend == ["brightest (2)", "bright (2)", "darkest (1)"], legend
+            print("vision ok: webcam frame annotated; legend", legend)
+        elif which == "mic":  # extras' Audio tab: record from the (fake) microphone, get it echoed back
+            page.get_by_role("button", name="Audio", exact=True).click()
+            page.get_by_role("button", name="Microphone").first.click()
+            page.get_by_role("button", name="Record").click()
+            page.wait_for_timeout(1200)
+            page.get_by_role("button", name="Stop").click()
+            page.wait_for_function("[...document.querySelectorAll('input[type=text]')].some(i => i.value.includes('recording.'))", timeout=15000)
+            info = [i.input_value() for i in page.locator("input[type=text]").all() if "recording." in i.input_value()][0]
+            assert page.locator(".drop audio").count() == 2, page.locator(".drop audio").count()
+            print("mic ok:", info)
         elif which == "mock":
             out = Path(sys.argv[3] if len(sys.argv) > 3 else ".")
             first, second = chat(page, sys.argv[2], out, "images=[PNG", "second turn")

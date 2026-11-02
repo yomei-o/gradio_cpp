@@ -395,7 +395,7 @@ inline bool is_layout_type(const std::string& t) {
 
 // Components whose value nests files somewhere inside.
 inline bool has_nested_files(const std::string& t) {
-    return t == "chatbot" || t == "multimodaltextbox" || t == "gallery";
+    return t == "chatbot" || t == "multimodaltextbox" || t == "gallery" || t == "annotatedimage";
 }
 
 inline Component Textbox(const std::string& label = "", int lines = 1, const std::string& placeholder = "",
@@ -418,8 +418,9 @@ inline Component Checkbox(const std::string& label = "", bool value = false) {
     return Component("checkbox", {{"label", label}, {"value", value}});
 }
 
-inline Component Image(const std::string& label = "") {
-    return Component("image", {{"label", label}, {"value", nullptr}, {"type", "filepath"}});
+// sources: "upload" and/or "webcam" (camera capture in the browser)
+inline Component Image(const std::string& label = "", std::vector<std::string> sources = {"upload", "webcam"}) {
+    return Component("image", {{"label", label}, {"value", nullptr}, {"type", "filepath"}, {"sources", sources}});
 }
 
 inline Component File(const std::string& label = "") {
@@ -482,8 +483,23 @@ inline Component Code(const std::string& label = "", const std::string& language
     return Component("code", {{"label", label}, {"language", language}, {"value", value}, {"lines", lines}});
 }
 
-inline Component Audio(const std::string& label = "") {
-    return Component("audio", {{"label", label}, {"value", nullptr}, {"type", "filepath"}});
+// sources: "upload" and/or "microphone"
+inline Component Audio(const std::string& label = "", std::vector<std::string> sources = {"upload", "microphone"}) {
+    return Component("audio", {{"label", label}, {"value", nullptr}, {"type", "filepath"}, {"sources", sources}});
+}
+
+// Image with detection boxes / masks drawn over it (value: gr::AnnotatedImage from gradio_image.hpp).
+inline Component AnnotatedImage(const std::string& label = "") {
+    return Component("annotatedimage", {{"label", label}, {"value", nullptr}});
+}
+
+// Simple charts over a DataFrame value: x and y name columns; color (optional) splits series.
+inline Component LinePlot(const std::string& label, const std::string& x, const std::string& y,
+                          const std::string& color = "") {
+    return Component("lineplot", {{"label", label}, {"x", x}, {"y", y}, {"color", color}, {"value", nullptr}});
+}
+inline Component BarPlot(const std::string& label, const std::string& x, const std::string& y) {
+    return Component("barplot", {{"label", label}, {"x", x}, {"y", y}, {"value", nullptr}});
 }
 
 inline Component Video(const std::string& label = "") {
