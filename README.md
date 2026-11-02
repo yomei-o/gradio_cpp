@@ -153,6 +153,8 @@ cmake --build build --config Release
 build/Release/hello.exe
 ```
 
+Linux（g++ 9 以降）なら `cmake -S . -B build && cmake --build build`。
+
 `include/` と `third_party/` を include パスに足し、Windows では `ws2_32` をリンクする。
 MSVC では `/utf-8 /bigobj` を付ける（CMake の `gradio_cpp` ターゲットが付ける）。
 
@@ -182,6 +184,8 @@ bash tests/run_all.sh some.png                                  # build/Release 
 LLM=http://127.0.0.1:8081 bash tests/run_all.sh some.png        # 本物の llama-server も
 GC_PYTHON=venv/Scripts/python bash tests/run_all.sh some.png    # gradio_client のテストも（tests/client_test.py）
 ```
+
+Linux 版（WSL の g++ でビルドしたもの）に同じテストを当てる：`bash tests/run_linux_wsl.sh some.png`
 
 個別に、サンプルを起動してから：
 

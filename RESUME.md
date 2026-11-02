@@ -122,7 +122,12 @@
   set_content_provider で 64KB ずつ（httplib が Range を処理するので 206 も返る）。
 * 200MB の往復で、サーバのメモリは 15.8MB → 17.0MB のまま。sha256 一致、Range 1000-1999 も一致。
 
+2026-11-02 v0.15（Linux）
+* ローカルの WSL（Ubuntu 20.04、aarch64、g++ 9.4）で全サンプルが警告なしでビルドできた。
+  `tests/run_linux_wsl.sh` が WSL 内でビルドし、Linux 版を起動して、Windows 側から e2e 9本＋gradio_client 7本を当てる。全部 PASS。
+  WSL1 なので localhost を共有している。
+
 ## 次にやること
 
-1. Linux（g++ / clang）でのビルドとテスト（Kaggle bridge かビルド機の WSL）。
-2. JS クライアント（@gradio/client）からの呼び出し確認。
+1. JS クライアント（@gradio/client）からの呼び出し確認。
+2. clang / macOS でのビルド確認（Mac 側セッションがあれば）。
