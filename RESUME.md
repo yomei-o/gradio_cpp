@@ -51,6 +51,13 @@
   sepia（handle_file のアップロード、出力のダウンロード、gr::Error → AppError）、components、chat（/chat に画像付き）。
 * `GC_PYTHON=... LLM=... tests/run_all.sh` で12本すべて PASS。
 
+2026-11-02 v0.5（llama.cpp 直結）
+* `examples/llama_local.cpp`：libllama と libmtmd を直接リンク（`-DGRADIO_LLAMA_CPP=...`。CMake は
+  `LLAMA_BUILD_MTMD=ON`、tools/common/tests はオフ、static）。
+* ビルド機（192.168.6.14）で、VS2022 x64、llama.cpp b12032 をビルド。PATH に cmake が無いので、vswhere で
+  VS 付属の cmake を使う。SmolVLM2-500M で、gradio_client から画像付きの /chat を呼び、ストリーミングで答えが返った
+  （「The background is blue.」など）。ブラウザでの確認は、同じ ChatInterface の llama_chat で済ませている。
+
 ## 次にやること
 
 1. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

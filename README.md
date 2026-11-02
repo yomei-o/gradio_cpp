@@ -41,6 +41,19 @@ chat.launch();
 
 Ollama や vLLM など、OpenAI 互換のサーバならそのまま使える（`--server`、`--model`）。
 
+### llama.cpp を直接リンクする版（サーバ不要、1つの exe）
+
+```sh
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DGRADIO_LLAMA_CPP=path/to/llama.cpp
+cmake --build build --config Release --target llama_local
+build/Release/llama_local.exe -m SmolVLM2-500M-Video-Instruct-Q8_0.gguf --mmproj mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf
+```
+
+`examples/llama_local.cpp` は libllama と libmtmd を直接呼ぶ。チャットテンプレートはモデルのものを使い、
+画像は `mtmd_helper_bitmap_init_from_buf` で読み込み、トークンが出るたびにストリーミングで返す。
+毎ターン会話全体を評価し直す（コードが短く、Clear や Stop で履歴が変わっても状態がずれない）。
+llama.cpp は b12032 で確認した。
+
 ## できること
 
 | | |
@@ -117,6 +130,7 @@ MSVC では `/utf-8 /bigobj` を付ける（CMake の `gradio_cpp` ターゲッ�
 * `examples/components.cpp` — Tabs / Accordion / Dropdown / Radio / CheckboxGroup / Gallery / `gr::update`
 * `examples/chat_echo.cpp` — LLM なしの ChatInterface（受け取ったものを返す）
 * `examples/llama_chat.cpp` — llama-server につなぐ画像付きチャット
+* `examples/llama_local.cpp` — llama.cpp（libmtmd）を直接リンクした画像付きチャット（`-DGRADIO_LLAMA_CPP=...` のときだけビルド）
 
 ## テスト
 

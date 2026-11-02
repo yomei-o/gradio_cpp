@@ -18,7 +18,7 @@ URL = "http://127.0.0.1:7860/"
 def main():
     which = sys.argv[1]
     png = sys.argv[2] if len(sys.argv) > 2 else None
-    c = Client(URL, verbose=False)
+    c = Client(URL, verbose=False, download_files=False if which == "llm" else True)
     if which == "hello":
         r = c.predict("World", 3, api_name="/predict")
         assert r == "Hello, World!!!", r
@@ -62,6 +62,13 @@ def main():
         r = c.predict({"text": "hello", "files": [handle_file(png)]}, api_name="/chat")
         assert "Got image" in r and "You said: hello" in r, r
         print("chat ok:", r.replace("\n", " ")[:80])
+    elif which == "llm":  # a real model behind /chat: any non-empty answer, streamed
+        q = sys.argv[3] if len(sys.argv) > 3 else "Describe this image in one sentence."
+        job = c.submit({"text": q, "files": [handle_file(png)]}, api_name="/chat")
+        parts = list(job)
+        r = job.result()
+        assert r.strip(), r
+        print(f"llm ok ({len(parts)} streamed updates):", r)
     else:
         raise SystemExit("unknown test " + which)
     c.close()
