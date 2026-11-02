@@ -666,13 +666,27 @@ inline Component ClearButton(std::vector<int> components = {}, const std::string
 // ---------------------------------------------------------------------------
 using Emit = std::function<void(const json& outputs)>;
 using ProgressFn = std::function<void(double fraction, const std::string& desc)>;
+// Who is calling (like gr.Request): take `const gr::Request&` anywhere in the parameter list.
+struct Request {
+    std::string username;      // logged-in user ("" without auth)
+    std::string client_host;   // remote address
+    std::string session_hash;  // gradio_client / queue session ("" for /call)
+    std::map<std::string, std::string> headers;  // lower-case names
+    std::string header(const std::string& name) const {
+        std::string k = detail::lower(name);
+        auto it = headers.find(k);
+        return it == headers.end() ? std::string() : it->second;
+    }
+};
+
 struct CallContext {
     Emit emit;
     ProgressFn progress;
+    Request request;
 };
 using Handler = std::function<json(const json& args, const CallContext& ctx)>;
 
-// Take `const gr::Progress&` as the last parameter to report progress (like gr.Progress):
+// Take `const gr::Progress&` as a parameter to report progress (like gr.Progress):
 //   [](int n, const gr::Progress& progress) { for (...) progress(i / (double)n, "working"); return r; }
 class Progress {
 public:
@@ -685,7 +699,7 @@ private:
     ProgressFn p_;
 };
 
-// Take `const gr::Yield&` as the last parameter to stream intermediate results:
+// Take `const gr::Yield&` as a parameter to stream intermediate results (a generator):
 //   [](int n, const gr::Yield& y) { for (...) y(partial); }
 class Yield {
 public:
@@ -726,16 +740,20 @@ struct is_tuple : std::false_type {};
 template <class... T>
 struct is_tuple<std::tuple<T...>> : std::true_type {};
 
-// 0: plain, 1: last parameter is Yield (generator), 2: last parameter is Progress
-template <class Args, size_t N = std::tuple_size_v<Args>>
-struct last_kind
-    : std::integral_constant<int, std::is_same_v<std::tuple_element_t<N - 1, Args>, Yield>      ? 1
-                                  : std::is_same_v<std::tuple_element_t<N - 1, Args>, Progress> ? 2
-                                                                                                 : 0> {};
+// Yield / Progress / Request parameters are filled by the framework, the others from the inputs.
+template <class T>
+inline constexpr bool is_special_v = std::is_same_v<T, Yield> || std::is_same_v<T, Progress> || std::is_same_v<T, Request>;
+
+template <class Args, size_t... J>
+constexpr size_t count_plain(std::index_sequence<J...>) {
+    return (size_t(0) + ... + (is_special_v<std::tuple_element_t<J, Args>> ? 0 : 1));
+}
+template <class Args, size_t... J>
+constexpr bool has_yield(std::index_sequence<J...>) {
+    return (false || ... || std::is_same_v<std::tuple_element_t<J, Args>, Yield>);
+}
 template <class Args>
-struct last_kind<Args, 0> : std::integral_constant<int, 0> {};
-template <class Args>
-struct last_is_yield : std::bool_constant<last_kind<Args>::value == 1> {};
+struct last_is_yield : std::bool_constant<has_yield<Args>(std::make_index_sequence<std::tuple_size_v<Args>>{})> {};
 
 template <class R>
 json result_to_json(R&& r) {
@@ -748,26 +766,27 @@ json result_to_json(R&& r) {
     return a;
 }
 
-template <class F, class Args, int Kind, size_t... I>
+template <class T, class Args, size_t I>
+decltype(auto) arg_at(const json& args, const Yield& y, const Progress& p, const Request& r) {
+    if constexpr (std::is_same_v<T, Yield>) return (y);
+    else if constexpr (std::is_same_v<T, Progress>) return (p);
+    else if constexpr (std::is_same_v<T, Request>) return (r);
+    else return args[count_plain<Args>(std::make_index_sequence<I>{})].template get<T>();
+}
+
+template <class F, class Args, size_t... I>
 json invoke_typed(F& fn, const json& args, const CallContext& ctx, std::index_sequence<I...>) {
     using R = typename fn_traits<F>::ret;
-    if constexpr (Kind == 1) {
-        Yield y(ctx.emit, ctx.progress);
-        fn(args[I].template get<std::tuple_element_t<I, Args>>()..., y);
+    Yield y(ctx.emit, ctx.progress);
+    Progress pr(ctx.progress);
+    if constexpr (last_is_yield<Args>::value) {
+        fn(arg_at<std::tuple_element_t<I, Args>, Args, I>(args, y, pr, ctx.request)...);
         return nullptr;
-    } else if constexpr (Kind == 2) {
-        Progress pr(ctx.progress);
-        if constexpr (std::is_void_v<R>) {
-            fn(args[I].template get<std::tuple_element_t<I, Args>>()..., pr);
-            return json::array();
-        } else {
-            return result_to_json(fn(args[I].template get<std::tuple_element_t<I, Args>>()..., pr));
-        }
     } else if constexpr (std::is_void_v<R>) {
-        fn(args[I].template get<std::tuple_element_t<I, Args>>()...);
+        fn(arg_at<std::tuple_element_t<I, Args>, Args, I>(args, y, pr, ctx.request)...);
         return json::array();
     } else {
-        return result_to_json(fn(args[I].template get<std::tuple_element_t<I, Args>>()...));
+        return result_to_json(fn(arg_at<std::tuple_element_t<I, Args>, Args, I>(args, y, pr, ctx.request)...));
     }
 }
 
@@ -775,15 +794,14 @@ template <class F>
 Handler make_handler(F fn, bool& streaming, size_t& n_args) {
     using Args = typename fn_traits<F>::args;
     static constexpr size_t N = std::tuple_size_v<Args>;
-    static constexpr int kind = last_kind<Args>::value;
-    static constexpr size_t NA = kind ? N - 1 : N;
-    streaming = kind == 1;
+    static constexpr size_t NA = count_plain<Args>(std::make_index_sequence<N>{});
+    streaming = last_is_yield<Args>::value;
     n_args = NA;
     return [fn](const json& args, const CallContext& ctx) mutable -> json {
         if (!args.is_array() || args.size() < NA)
             throw Error("expected " + std::to_string(NA) + " input value(s), got " +
                         std::to_string(args.is_array() ? args.size() : 0));
-        return invoke_typed<F, Args, kind>(fn, args, ctx, std::make_index_sequence<NA>{});
+        return invoke_typed<F, Args>(fn, args, ctx, std::make_index_sequence<N>{});
     };
 }
 
@@ -1176,7 +1194,7 @@ public:
                 auto now = std::chrono::steady_clock::now();
                 for (auto it = events_.begin(); it != events_.end();)
                     it = (now - it->second.created > std::chrono::minutes(10)) ? events_.erase(it) : std::next(it);
-                events_[id] = {(size_t)(d - deps_.data()), body["data"], now};
+                events_[id] = {make_request(req, ""), (size_t)(d - deps_.data()), body["data"], now};
             }
             res.set_content(json{{"event_id", id}}.dump(), "application/json");
         });
@@ -1254,6 +1272,7 @@ private:
         int trigger_after = -1;
     };
     struct Event {
+        Request request;
         size_t dep = 0;
         json data;
         std::chrono::steady_clock::time_point created;
@@ -1416,7 +1435,7 @@ private:
     // Run a handler: input checks, concurrency limit, streaming. Returns the final
     // outputs. emit may throw detail::Cancelled to abort.
     json execute(const Dep& d, json data, const Emit& emit, const ProgressFn& progress = {},
-                 std::map<int, json>* state = nullptr) {
+                 std::map<int, json>* state = nullptr, const Request& request = {}) {
         for (size_t i = 0; i < d.inputs.size(); ++i) {
             const Component* c = find_comp(d.inputs[i]);
             if (!c || c->type != "state") continue;
@@ -1442,7 +1461,7 @@ private:
                             last = v;
                             emit(v);
                         },
-                        progress};
+                        progress, request};
         json out = d.fn(data, ctx);
         if (out.is_null()) out = last;
         postprocess(d, out);
@@ -1485,7 +1504,8 @@ private:
             json out = execute(deps_[ev.dep], ev.data, [&](const json& o) { send("generating", o); },
                                [&](double f, const std::string& desc) {
                                    send("progress", {{"progress", f}, {"desc", desc}});
-                               });
+                               },
+                               nullptr, ev.request);
             send("complete", out);
         } catch (const detail::Cancelled&) {
         } catch (const std::exception& e) {
@@ -1553,7 +1573,7 @@ private:
         return json::array({json::array({"replace", json::array(), cur})});
     }
 
-    void run_queued(size_t dep, json data, std::string event_id, std::shared_ptr<Session> s,
+    void run_queued(size_t dep, json data, std::string event_id, Request request, std::shared_ptr<Session> s,
                     std::shared_ptr<std::atomic<bool>> cancelled) {
         const Dep& d = deps_[dep];
         push(*s, {{"msg", "process_starts"}, {"event_id", event_id}, {"eta", nullptr}});
@@ -1580,7 +1600,7 @@ private:
                 push(*s, {{"msg", "progress"}, {"event_id", event_id},
                           {"progress_data", json::array({{{"index", nullptr}, {"length", nullptr}, {"unit", "steps"},
                                                           {"progress", f}, {"desc", desc}}})}});
-            }, &st);
+            }, &st, request);
             {
                 std::lock_guard<std::mutex> lk(s->m);
                 for (auto& [k, v] : st) s->state[k] = v;
@@ -1631,7 +1651,9 @@ private:
                                 {"queue_size", s->pending}, {"rank_eta", nullptr}});
             }
             s->cv.notify_all();
-            std::thread(&Blocks::run_queued, this, (size_t)fi, std::move(data), event_id, s, flag).detach();
+            std::thread(&Blocks::run_queued, this, (size_t)fi, std::move(data), event_id,
+                        make_request(req, body["session_hash"].get<std::string>()), s, flag)
+                .detach();
             res.set_content(json{{"event_id", event_id}}.dump(), "application/json");
         });
         svr.Get("/gradio_api/queue/data", [this](const httplib::Request& req, httplib::Response& res) {
@@ -1707,6 +1729,16 @@ private:
     std::mutex events_m_;
     std::map<std::string, Event> events_;
     std::string cookie_name() const { return "access-token-" + cookie_id_; }
+
+    Request make_request(const httplib::Request& req, const std::string& session) const {
+        Request r;
+        r.username = user_of(req);
+        r.client_host = req.remote_addr;
+        r.session_hash = session;
+        for (auto& [k, v] : req.headers)
+            if (detail::lower(k) != "cookie") r.headers[detail::lower(k)] = v;
+        return r;
+    }
 
     void mount_auth(httplib::Server& svr) {
         if (!auth_) return;

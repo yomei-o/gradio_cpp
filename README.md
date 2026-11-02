@@ -78,6 +78,7 @@ llama.cpp は b12032 で確認した。
 | 型付きハンドラ | 引数の型（`std::string`, `double`, `int`, `bool`, `gr::FileData`, `gr::json`）に自動変換。複数出力は `std::tuple` で返す |
 | ストリーミング | 最後の引数を `const gr::Yield&` にすると generator になり、`yield(...)` のたびにブラウザへ送る |
 | 画像 | `gradio_image.hpp`（stb_image）で `gr::load_pixels()` / `gr::to_png()` / `gr::to_jpeg(px, quality)`。読めるのは PNG / JPEG / BMP / GIF / TGA / PSD / HDR / PNM（WebP は非対応で、渡すとエラーメッセージを返す） |
+| `gr::Request` | 引数のどこかに `const gr::Request&` を置くと、username / client_host / headers / session_hash が取れる（本家の gr.Request）。Yield / Progress も引数のどこに置いてもよい |
 | エラー | `throw gr::Error("...")` でブラウザにトースト表示 |
 | 同時実行 | イベントごとに `concurrency_limit`（既定 1、Gradio と同じ） |
 

@@ -99,7 +99,11 @@
 * `/config` に `auth_required` と `auth_message`。フロントは /config が 401 ならログイン画面を出す。
 * curl（401 / 400 / Cookie 付きで 200）、e2e login、gradio_client の `auth=`（無し・誤りは拒否）を確認。run_all 21本 PASS。
 
+2026-11-02 v0.11（gr::Request）
+* Yield / Progress / Request は「特殊引数」で、引数のどこにあってもよい。入力値は、特殊でない引数に順に割り当てる
+  （`count_plain` で、引数 I より前にある普通の引数の数を数え、それを args の添字にする）。
+* Request は /call では POST 時に、queue では join 時に作る（Cookie ヘッダは入れない）。
+
 ## 次にやること
 
-1. ハンドラからログイン中のユーザー名を見られるように（本家の gr.Request.username 相当）。
-2. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。
+1. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

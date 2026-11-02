@@ -245,7 +245,7 @@ def main():
             page.wait_for_selector("text=Members only")
             page.locator("input[type=text]").first.fill("Taro")
             page.get_by_role("button", name="Submit").click()
-            page.wait_for_function("[...document.querySelectorAll('input[type=text]')].some(i => i.value === 'Hello, Taro!')")
+            page.wait_for_function("[...document.querySelectorAll('input[type=text]')].some(i => i.value.startsWith('Hello, Taro! (logged in as admin from '))")
             page.get_by_role("link", name="Logout").click()
             page.wait_for_selector("form.login")
             print("login ok: wrong password refused, app used, logged out")

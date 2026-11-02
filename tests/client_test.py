@@ -28,7 +28,7 @@ def main():
                 pass
         c = Client(URL, verbose=False, auth=("admin", "secret"))
         r = c.predict("Hanako", api_name="/predict")
-        assert r == "Hello, Hanako!", r
+        assert r.startswith("Hello, Hanako! (logged in as admin from "), r
         print("login ok: no auth / wrong password refused;", r)
         c.close()
         return
