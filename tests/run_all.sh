@@ -3,6 +3,7 @@
 # GC_PYTHON points at a Python with gradio_client installed, the gradio_client tests.
 #   tests/run_all.sh <some.png> [exe_dir] [out_dir]
 #   GC_PYTHON=venv/Scripts/python LLM=http://127.0.0.1:8081 tests/run_all.sh x.png
+#   GRADIO_CLIENT_DIR=<dir with node_modules/@gradio/client> also runs the JS client tests
 set -u
 PNG=${1:?usage: run_all.sh some.png [exe_dir] [out_dir]}
 BIN=${2:-build/Release}
@@ -66,5 +67,13 @@ if [ -n "${GC_PYTHON:-}" ]; then
   run studio -- $GC studio "$PNG"
   run login -- $GC login
   run chat_echo -- $GC chat "$PNG"
+fi
+if [ -n "${GRADIO_CLIENT_DIR:-}" ]; then  # a folder where `npm install @gradio/client` was run
+  JS="node tests/js_client_test.mjs"
+  PNGW=$(cygpath -m "$PNG" 2>/dev/null || echo "$PNG")
+  run hello -- $JS hello
+  run blocks -- $JS blocks
+  run sepia -- $JS sepia "$PNGW"
+  run login -- $JS login
 fi
 exit $fail

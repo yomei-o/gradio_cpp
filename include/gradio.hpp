@@ -689,6 +689,13 @@ struct Request {
     std::string client_host;   // remote address
     std::string session_hash;  // gradio_client / queue session ("" for /call)
     std::map<std::string, std::string> headers;  // lower-case names
+    // "http://host:port" as the client sees it (honours X-Forwarded-Proto / X-Forwarded-Host).
+    std::string origin() const {
+        std::string proto = header("x-forwarded-proto"), host = header("x-forwarded-host");
+        if (host.empty()) host = header("host");
+        if (host.empty()) return "";
+        return (proto.empty() ? "http" : proto.substr(0, proto.find(','))) + "://" + host.substr(0, host.find(','));
+    }
     std::string header(const std::string& name) const {
         std::string k = detail::lower(name);
         auto it = headers.find(k);
@@ -1194,8 +1201,10 @@ public:
         svr.Get("/", [this](const httplib::Request&, httplib::Response& res) {
             res.set_content(frontend_html(), "text/html; charset=utf-8");
         });
-        svr.Get("/config", [this](const httplib::Request&, httplib::Response& res) {
-            res.set_content(config().dump(), "application/json");
+        svr.Get("/config", [this](const httplib::Request& req, httplib::Response& res) {
+            json c = config();
+            c["root"] = make_request(req, "").origin() + detail::root_path();
+            res.set_content(c.dump(), "application/json");
         });
         svr.Get("/gradio_api/info", [this](const httplib::Request&, httplib::Response& res) {
             res.set_content(api_info().dump(), "application/json");
@@ -1517,6 +1526,7 @@ private:
         CallContext ctx{[&](const json& o) {
                             json v = o;
                             postprocess(d, v);
+                            absolutize(v, request.origin());
                             last = v;
                             emit(v);
                         },
@@ -1524,10 +1534,25 @@ private:
         json out = d.fn(data, ctx);
         if (out.is_null()) out = last;
         postprocess(d, out);
+        absolutize(out, request.origin());
         if (state)
             for (size_t i = 0; i < d.outputs.size() && i < out.size(); ++i)
                 if (const Component* c = find_comp(d.outputs[i]); c && c->type == "state") (*state)[c->id] = out[i];
         return out;
+    }
+
+    // File URLs go out absolute ("http://host/gradio_api/file=..."), like Gradio's.
+    static void absolutize(json& j, const std::string& origin) {
+        if (origin.empty()) return;
+        if (j.is_object()) {
+            if (j.contains("path") && j.contains("url") && j["url"].is_string()) {
+                const std::string& u = j["url"].get_ref<const std::string&>();
+                if (!u.empty() && u[0] == '/') j["url"] = origin + u;
+            }
+            for (auto& [k, v] : j.items()) absolutize(v, origin);
+        } else if (j.is_array()) {
+            for (auto& v : j) absolutize(v, origin);
+        }
     }
 
     // A DataFrame returned for a native plot becomes {columns, data, datatypes, mark}.
@@ -1812,7 +1837,10 @@ private:
             return httplib::Server::HandlerResponse::Handled;
         });
         auto login = [this](const httplib::Request& req, httplib::Response& res) {
-            std::string u = req.get_param_value("username"), pw = req.get_param_value("password");
+            auto field = [&](const char* k) {  // form-urlencoded (browsers, gradio_client) or multipart (@gradio/client)
+                return req.has_param(k) ? req.get_param_value(k) : req.has_file(k) ? req.get_file_value(k).content : std::string();
+            };
+            std::string u = field("username"), pw = field("password");
             while (!u.empty() && std::isspace((unsigned char)u.back())) u.pop_back();
             while (!u.empty() && std::isspace((unsigned char)u.front())) u.erase(0, 1);
             if (u.empty() || !auth_(u, pw)) {

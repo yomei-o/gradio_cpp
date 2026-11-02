@@ -142,7 +142,9 @@ for partial in c.submit("hi", 4, api_name="/stream"): ...      # ストリーミ
 c.predict({"text": "これは何？", "files": [handle_file("cat.png")]}, api_name="/chat")   # ChatInterface
 ```
 
-gradio_client 2.7.2 で確認済み。`/config` の `version` は、話しているプロトコルの水準として "5.0.0" を名乗る
+gradio_client 2.7.2 で確認済み。JavaScript の公式クライアント `@gradio/client`（2.7.2）からも、
+`Client.connect(url, { auth: [...] })` → `predict` / `submit`（ストリーミング）/ `handle_file` で呼べる。
+出力ファイルの URL は本家と同じく絶対 URL（`http://host/gradio_api/file=...`。プロキシの X-Forwarded-Host / Proto も見る）。`/config` の `version` は、話しているプロトコルの水準として "5.0.0" を名乗る
 （gradio_cpp 自身の版は `gradio_cpp_version`）。
 
 ## ビルド
@@ -183,6 +185,7 @@ MSVC では `/utf-8 /bigobj` を付ける（CMake の `gradio_cpp` ターゲッ�
 bash tests/run_all.sh some.png                                  # build/Release の exe を使う
 LLM=http://127.0.0.1:8081 bash tests/run_all.sh some.png        # 本物の llama-server も
 GC_PYTHON=venv/Scripts/python bash tests/run_all.sh some.png    # gradio_client のテストも（tests/client_test.py）
+GRADIO_CLIENT_DIR=<npm install @gradio/client した場所> bash tests/run_all.sh some.png   # JS クライアントも
 ```
 
 Linux 版（WSL の g++ でビルドしたもの）に同じテストを当てる：`bash tests/run_linux_wsl.sh some.png`

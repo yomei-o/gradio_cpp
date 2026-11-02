@@ -127,7 +127,14 @@
   `tests/run_linux_wsl.sh` が WSL 内でビルドし、Linux 版を起動して、Windows 側から e2e 9本＋gradio_client 7本を当てる。全部 PASS。
   WSL1 なので localhost を共有している。
 
+2026-11-02 v0.16（JS クライアント）
+* @gradio/client 2.7.2 から hello / blocks（submit のストリーム）/ sepia（handle_file と出力のダウンロード）/ login。
+* 直したところ：JS はログインを multipart で送る（/login は urlencoded と multipart の両方を読む）。
+  出力の FileData.url は相対のままだと JS の fetch が失敗するので、Request::origin()（X-Forwarded-* を優先）を前置して絶対 URL に。
+  /config の root も origin + root_path。
+* run_all：e2e 13本＋gradio_client 10本＋プロキシ 2本＋JS 4本、計29本 PASS。
+
 ## 次にやること
 
-1. JS クライアント（@gradio/client）からの呼び出し確認。
-2. clang / macOS でのビルド確認（Mac 側セッションがあれば）。
+1. clang / macOS でのビルド確認（Mac 側セッションがあれば）。
+2. 本家の残り：gr.Interface の live モード、Examples のキャッシュ、イベントの every=（定期実行）、gr.Timer。
