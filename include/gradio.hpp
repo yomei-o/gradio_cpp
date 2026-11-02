@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include <condition_variable>
+#include <ctime>
 #include <deque>
 #include <thread>
 #include <filesystem>
@@ -384,7 +385,7 @@ struct Component {
 };
 
 inline bool is_file_type(const std::string& t) {
-    return t == "image" || t == "file" || t == "audio" || t == "video";
+    return t == "image" || t == "file" || t == "audio" || t == "video" || t == "model3d";
 }
 
 inline bool skip_api_type(const std::string& t) { return t == "state"; }
@@ -395,7 +396,7 @@ inline bool is_layout_type(const std::string& t) {
 
 // Components whose value nests files somewhere inside.
 inline bool has_nested_files(const std::string& t) {
-    return t == "chatbot" || t == "multimodaltextbox" || t == "gallery" || t == "annotatedimage";
+    return t == "chatbot" || t == "multimodaltextbox" || t == "gallery" || t == "annotatedimage" || t == "imageeditor";
 }
 
 inline Component Textbox(const std::string& label = "", int lines = 1, const std::string& placeholder = "",
@@ -493,13 +494,35 @@ inline Component AnnotatedImage(const std::string& label = "") {
     return Component("annotatedimage", {{"label", label}, {"value", nullptr}});
 }
 
-// Simple charts over a DataFrame value: x and y name columns; color (optional) splits series.
+// Charts (Gradio's native plots). Return a gr::DataFrame (or gr::PlotData); x / y / color
+// name its columns. The value on the wire is {columns, data, datatypes, mark}.
+inline Component NativePlot(const std::string& mark, const std::string& label, const std::string& x,
+                            const std::string& y, const std::string& color = "") {
+    return Component("nativeplot", {{"label", label}, {"x", x}, {"y", y},
+                                    {"color", color.empty() ? json(nullptr) : json(color)},
+                                    {"value", nullptr}, {"_mark", mark}});
+}
 inline Component LinePlot(const std::string& label, const std::string& x, const std::string& y,
                           const std::string& color = "") {
-    return Component("lineplot", {{"label", label}, {"x", x}, {"y", y}, {"color", color}, {"value", nullptr}});
+    return NativePlot("line", label, x, y, color);
 }
-inline Component BarPlot(const std::string& label, const std::string& x, const std::string& y) {
-    return Component("barplot", {{"label", label}, {"x", x}, {"y", y}, {"value", nullptr}});
+inline Component BarPlot(const std::string& label, const std::string& x, const std::string& y,
+                         const std::string& color = "") {
+    return NativePlot("bar", label, x, y, color);
+}
+inline Component ScatterPlot(const std::string& label, const std::string& x, const std::string& y,
+                             const std::string& color = "") {
+    return NativePlot("point", label, x, y, color);
+}
+
+// Draw on an image (gr.ImageEditor). Value: gr::EditorValue.
+inline Component ImageEditor(const std::string& label = "") {
+    return Component("imageeditor", {{"label", label}, {"value", nullptr}, {"brush_colors", {"#000000", "#ff0000", "#00a000", "#0050ff", "#ffffff"}}});
+}
+
+// 3D model viewer (.obj / .stl shown in the browser; other formats offered for download).
+inline Component Model3D(const std::string& label = "") {
+    return Component("model3d", {{"label", label}, {"value", nullptr}});
 }
 
 inline Component Video(const std::string& label = "") {
@@ -515,6 +538,37 @@ inline Component Dataframe(const std::string& label = "", const std::vector<std:
     return Component("dataframe", {{"label", label},
                                    {"headers", headers},
                                    {"value", {{"headers", headers}, {"data", json::array()}, {"metadata", nullptr}}}});
+}
+
+// Value of an ImageEditor: the uploaded background, the drawn layers (transparent PNGs)
+// and the composite of both.
+struct EditorValue {
+    FileData background;
+    std::vector<FileData> layers;
+    FileData composite;
+};
+inline void to_json(json& j, const EditorValue& v) {
+    j = {{"background", v.background}, {"layers", v.layers}, {"composite", v.composite}, {"id", nullptr}};
+}
+inline void from_json(const json& j, EditorValue& v) {
+    v = EditorValue{};
+    if (!j.is_object()) return;
+    if (j.contains("background")) v.background = j["background"].get<FileData>();
+    if (j.contains("composite")) v.composite = j["composite"].get<FileData>();
+    if (j.contains("layers") && j["layers"].is_array())
+        for (auto& l : j["layers"])
+            if (!l.is_null()) v.layers.push_back(l.get<FileData>());
+}
+
+// Value of a native plot, if you want to set datatypes yourself; a gr::DataFrame also works.
+struct PlotData {
+    std::vector<std::string> columns;
+    std::vector<std::vector<json>> data;
+    std::map<std::string, std::string> datatypes;  // column -> "quantitative" / "nominal" / "temporal"
+    std::string mark = "line";
+};
+inline void to_json(json& j, const PlotData& v) {
+    j = {{"columns", v.columns}, {"data", v.data}, {"datatypes", v.datatypes}, {"mark", v.mark}};
 }
 
 // Value of a Label output: {"label": top, "confidences": [{"label", "confidence"}, ...]}.
@@ -757,6 +811,71 @@ private:
 
 struct Cancelled {};
 
+inline std::string csv_cell(const std::string& v) {
+    std::string s = v;
+    if (!s.empty() && std::string("=+-@").find(s[0]) != std::string::npos) s = "'" + s;  // no formulas in Excel
+    if (s.find_first_of(",\"\r\n") == std::string::npos) return s;
+    std::string q = "\"";
+    for (char c : s) q += c == '"' ? std::string("\"\"") : std::string(1, c);
+    return q + "\"";
+}
+
+// Append one flagged sample to <dir>/dataset1.csv; files are copied to <dir>/<label>/<id>/.
+inline void flag_row(const std::string& dir, const std::vector<std::string>& labels, const json& values, std::mutex& m) {
+    std::lock_guard<std::mutex> lk(m);
+    fs::path root = u8path(dir);
+    fs::create_directories(root);
+    std::vector<std::string> row;
+    for (size_t i = 0; i < labels.size(); ++i) {
+        const json v = i < values.size() ? values[i] : json();
+        if (v.is_object() && v.contains("path") && v["path"].is_string()) {
+            std::string src = v["path"].get<std::string>();
+            if (!Cache::get().allowed(src)) {
+                row.push_back("");
+                continue;
+            }
+            fs::path d = root / u8path(sanitize_name(labels[i])) / random_hex(12);
+            fs::create_directories(d);
+            fs::path dst = d / u8path(sanitize_name(u8str(u8path(src).filename())));
+            std::error_code ec;
+            fs::copy_file(u8path(src), dst, fs::copy_options::overwrite_existing, ec);
+            row.push_back(ec ? "" : u8str(fs::relative(dst, root, ec)));
+        } else if (v.is_string()) {
+            row.push_back(v.get<std::string>());
+        } else if (v.is_null()) {
+            row.push_back("");
+        } else {
+            row.push_back(v.dump(-1, ' ', false, json::error_handler_t::replace));
+        }
+    }
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char ts[32];
+    std::strftime(ts, sizeof ts, "%Y-%m-%d %H:%M:%S", &tm);
+    row.push_back(ts);
+
+    fs::path file = root / "dataset1.csv";
+    bool fresh = !fs::exists(file);
+    std::ofstream f(file, std::ios::binary | std::ios::app);
+    if (!f) throw Error("cannot write " + u8str(file));
+    auto line = [&](const std::vector<std::string>& cells) {
+        for (size_t i = 0; i < cells.size(); ++i) f << (i ? "," : "") << csv_cell(cells[i]);
+        f << "\r\n";
+    };
+    if (fresh) {
+        std::vector<std::string> h = labels;
+        h.push_back("timestamp");
+        line(h);
+    }
+    line(row);
+}
+
 }  // namespace detail
 
 struct EventOptions {
@@ -868,6 +987,40 @@ public:
     int change(int trigger, F fn, std::vector<int> inputs, std::vector<int> outputs, const std::string& api_name = "") {
         return on({{trigger, "change"}}, std::move(fn), std::move(inputs), std::move(outputs), {api_name});
     }
+    // Untyped handler: gets the raw input list, returns the output list.
+    int on_raw(std::vector<std::pair<int, std::string>> targets, Handler fn, std::vector<int> inputs,
+               std::vector<int> outputs, EventOptions opt = {}) {
+        Dep d;
+        d.targets = std::move(targets);
+        d.inputs = std::move(inputs);
+        d.outputs = std::move(outputs);
+        d.n_args = d.inputs.size();
+        d.fn = std::move(fn);
+        d.api_name = unique_api_name(opt.api_name.empty() ? "predict" : opt.api_name);
+        d.show_api = opt.show_api;
+        if (opt.concurrency_limit > 0) d.sem = std::make_shared<detail::Semaphore>(opt.concurrency_limit);
+        deps_.push_back(std::move(d));
+        return (int)deps_.size() - 1;
+    }
+
+    // Flag button: appends the values of `components` to <dir>/dataset1.csv (Gradio's CSVLogger
+    // layout: one column per label plus "timestamp"; files are copied next to it).
+    int flagging(int button, std::vector<int> components, const std::string& dir = ".gradio/flagged") {
+        std::vector<std::string> labels;
+        for (size_t i = 0; i < components.size(); ++i) {
+            const Component* c = find_comp(components[i]);
+            std::string l = c ? c->props.value("label", std::string()) : std::string();
+            labels.push_back(l.empty() ? "component " + std::to_string(i) : l);
+        }
+        auto mtx = std::make_shared<std::mutex>();
+        return on_raw({{button, "click"}},
+                      [labels, dir, mtx](const json& args, const CallContext&) -> json {
+                          detail::flag_row(dir, labels, args, *mtx);
+                          return json::array();
+                      },
+                      components, {}, {"flag", 0, false});
+    }
+
     // Run after event `after` finishes successfully (like Gradio's .then / .success).
     template <class F>
     int then(int after, F fn, std::vector<int> inputs, std::vector<int> outputs, EventOptions opt = {}) {
@@ -1244,16 +1397,40 @@ private:
         }
         json last = json::array();
         CallContext ctx{[&](const json& o) {
-                            last = o;
-                            emit(o);
+                            json v = o;
+                            postprocess(d, v);
+                            last = v;
+                            emit(v);
                         },
                         progress};
         json out = d.fn(data, ctx);
         if (out.is_null()) out = last;
+        postprocess(d, out);
         if (state)
             for (size_t i = 0; i < d.outputs.size() && i < out.size(); ++i)
                 if (const Component* c = find_comp(d.outputs[i]); c && c->type == "state") (*state)[c->id] = out[i];
         return out;
+    }
+
+    // A DataFrame returned for a native plot becomes {columns, data, datatypes, mark}.
+    void postprocess(const Dep& d, json& out) const {
+        if (!out.is_array()) return;
+        for (size_t i = 0; i < d.outputs.size() && i < out.size(); ++i) {
+            const Component* c = find_comp(d.outputs[i]);
+            if (!c || c->type != "nativeplot" || !out[i].is_object() || !out[i].contains("headers")) continue;
+            json df = out[i];
+            json types = json::object();
+            const json& rows = df.value("data", json::array());
+            const json& heads = df["headers"];
+            for (size_t k = 0; k < heads.size(); ++k) {
+                bool num = !rows.empty();
+                for (auto& r : rows)
+                    if (k < r.size() && !r[k].is_number()) num = false;
+                types[heads[k].get<std::string>()] = num ? "quantitative" : "nominal";
+            }
+            out[i] = {{"columns", heads}, {"data", rows}, {"datatypes", types},
+                      {"mark", c->props.value("_mark", std::string("line"))}};
+        }
     }
 
     static std::string dump(const json& j) { return j.dump(-1, ' ', false, json::error_handler_t::replace); }
@@ -1531,6 +1708,7 @@ public:
                         c.label(outputs.size() == 1 ? "output" : "output " + std::to_string(i));
                     out.push_back(blocks_.add(c));
                 }
+                flag_btn_ = blocks_.add(Button("Flag"));
             });
         });
         std::vector<int> all = in;
@@ -1538,6 +1716,7 @@ public:
         blocks_.component(clear).set("components", all);
         blocks_.on(targets, std::move(fn), in, out, {"predict"});
         inputs_ = in;
+        blocks_.flagging(flag_btn_, all);
     }
 
     // Example inputs shown under the input column; one value per input.
@@ -1555,6 +1734,7 @@ public:
 private:
     Blocks blocks_;
     int input_col_ = 0;
+    int flag_btn_ = -1;
     std::vector<int> inputs_;
 };
 

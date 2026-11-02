@@ -29,6 +29,7 @@ run hello -- $E2E hello
 run extras -- $E2E extras "$OUT"
 run extras -- $E2E mic
 run vision -- $E2E vision "$OUT"
+run studio -- $E2E studio "$OUT"
 run chat_echo -- $E2E echo "$PNG" "$OUT"
 run chat_echo -- $E2E stop
 
@@ -47,6 +48,7 @@ if [ -n "${GC_PYTHON:-}" ]; then
   run components -- $GC components
   run extras -- $GC extras
   run vision -- $GC vision "$PNG"
+  run studio -- $GC studio "$PNG"
   run chat_echo -- $GC chat "$PNG"
 fi
 exit $fail

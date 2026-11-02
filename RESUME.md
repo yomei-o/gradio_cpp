@@ -82,6 +82,17 @@
 * e2e は Chromium のフェイクデバイス（`--use-fake-device-for-media-stream`）で、カメラ撮影と録音まで通す。
 * run_all：e2e 10本＋gradio_client 7本 PASS。
 
+2026-11-02 v0.9（残りの部品）
+* JPEG 書き出し（`to_jpeg`）。WebP はユーザー判断でやらない（読もうとすると明示的なエラー）。
+* グラフを本家の `nativeplot`（値 `{columns, data, datatypes, mark}`）に作り直した。ハンドラが DataFrame を返すと
+  `Blocks::postprocess` が変換する（generating 中も）。mark は props の `_mark`。
+* Flagging（`Blocks::flagging`、Interface は既定で Flag ボタン）。本家 CSVLogger と同じ列（ラベル…, timestamp）。
+* ImageEditor（背景＋透明レイヤ＋合成を、それぞれ PNG でアップロードして `{background, layers, composite}`）、
+  Model3D（OBJ / STL を canvas 2D で描く。画家のアルゴリズム、法線で陰影）。
+* `Blocks::on_raw`：型なしハンドラ（引数は json の配列）。
+* run_all：e2e 11本＋gradio_client 8本 PASS。
+
 ## 次にやること
 
-1. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。
+1. 認証（本家の `launch(auth=...)` 相当、`/login`、Cookie、gradio_client の `auth=`）。
+2. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

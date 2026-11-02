@@ -150,7 +150,18 @@ def main():
             assert page.locator("input[type=text]").first.input_value() == "C++"
             page.get_by_role("button", name="Submit").click()
             page.wait_for_function("[...document.querySelectorAll('input[type=text]')].some(i => i.value === 'Hello, C++!!!!!!!')")
-            print("hello ok: example row filled the inputs")
+            # Flag: the inputs and output land in .gradio/flagged/dataset1.csv (next to the exe's cwd)
+            csv = Path(".gradio/flagged/dataset1.csv")
+            before = csv.read_text(encoding="utf-8").count("\n") if csv.exists() else 0
+            page.get_by_role("button", name="Flag").click()
+            for _ in range(50):
+                if csv.exists() and csv.read_text(encoding="utf-8").count("\n") > before:
+                    break
+                page.wait_for_timeout(100)
+            lines = csv.read_text(encoding="utf-8").splitlines()
+            assert lines[0] == "name,intensity,greeting,timestamp", lines[0]
+            assert lines[-1].startswith("C++,7,Hello, C++!!!!!!!") is False and lines[-1].startswith('C++,7,"Hello, C++!!!!!!!"'), lines[-1]
+            print("hello ok: example row filled the inputs; flagged ->", lines[-1])
         elif which == "extras":
             out = Path(sys.argv[2] if len(sys.argv) > 2 else ".")
             add = page.get_by_role("button", name="Add one")
@@ -196,6 +207,33 @@ def main():
             info = [i.input_value() for i in page.locator("input[type=text]").all() if "recording." in i.input_value()][0]
             assert page.locator(".drop audio").count() == 2, page.locator(".drop audio").count()
             print("mic ok:", info)
+        elif which == "studio":
+            out = Path(sys.argv[2] if len(sys.argv) > 2 else ".")
+            cv = page.locator("canvas.draw")
+            box = cv.bounding_box()
+            page.mouse.move(box["x"] + 40, box["y"] + 40)
+            page.mouse.down()
+            for i in range(20):
+                page.mouse.move(box["x"] + 40 + i * 10, box["y"] + 40 + i * 6)
+            page.mouse.up()
+            page.get_by_role("button", name="Extract drawing").click()
+            page.wait_for_function("[...document.querySelectorAll('input[type=text]')].some(i => i.value.includes('pixels'))", timeout=15000)
+            painted = [i.input_value() for i in page.locator("input[type=text]").all() if "pixels" in i.input_value()][0]
+            assert not painted.startswith("0 "), painted
+            page.screenshot(path=str(out / "e2e_studio_draw.png"), full_page=True)
+            page.get_by_role("button", name="3D", exact=True).click()
+            page.get_by_role("button", name="Make torus").click()
+            page.wait_for_function("Number(document.querySelector('canvas.m3d')?.dataset.triangles) > 0", timeout=15000)
+            tri = page.locator("canvas.m3d").get_attribute("data-triangles")
+            cbox = page.locator("canvas.m3d").bounding_box()
+            page.mouse.move(cbox["x"] + 100, cbox["y"] + 100); page.mouse.down()
+            page.mouse.move(cbox["x"] + 180, cbox["y"] + 140); page.mouse.up()
+            page.screenshot(path=str(out / "e2e_studio_3d.png"), full_page=True)
+            page.get_by_role("button", name="Plot", exact=True).click()
+            page.get_by_role("button", name="Scatter").click()
+            page.wait_for_function("document.querySelectorAll('svg.plot circle').length === 100", timeout=15000)
+            page.screenshot(path=str(out / "e2e_studio_plot.png"), full_page=True)
+            print("studio ok: painted", painted, "; torus", tri, "triangles; 100 scatter points")
         elif which == "mock":
             out = Path(sys.argv[3] if len(sys.argv) > 3 else ".")
             first, second = chat(page, sys.argv[2], out, "images=[PNG", "second turn")

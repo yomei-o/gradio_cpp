@@ -63,7 +63,11 @@ llama.cpp は b12032 で確認した。
 | `gr::Interface` | 入力・出力・Clear/Submit を自動配置 |
 | `gr::Blocks` | `row()` / `column()` / `tabs()`+`tab()` / `accordion()` で自由レイアウト、`click` / `submit` / `change` イベント |
 | `gr::ChatInterface` | `fn(message, history[, yield])` だけでチャット画面。Stop ボタン、`/chat` API 付き |
-| コンポーネント | Textbox, Number, Slider, Checkbox, Image, File, Markdown, JSON, Button, ClearButton, Chatbot（messages 形式）, MultimodalTextbox, Dropdown, Radio, CheckboxGroup, Gallery, HTML, Code, Dataframe, Label, Audio, Video, State, AnnotatedImage, LinePlot, BarPlot |
+| コンポーネント | Textbox, Number, Slider, Checkbox, Image, File, Markdown, JSON, Button, ClearButton, Chatbot（messages 形式）, MultimodalTextbox, Dropdown, Radio, CheckboxGroup, Gallery, HTML, Code, Dataframe, Label, Audio, Video, State, AnnotatedImage, LinePlot, BarPlot, ScatterPlot, ImageEditor, Model3D |
+| グラフ | 本家の native plot 形式（`{columns, data, datatypes, mark}`）。ハンドラは `gr::DataFrame` を返せばよい |
+| ImageEditor | 背景画像に描き込み。値は `gr::EditorValue{background, layers, composite}`（本家と同じ形） |
+| Model3D | .obj / .stl をブラウザ内の簡易ビューアで表示（ドラッグで回転、ホイールで拡大）。それ以外はダウンロードリンク |
+| Flagging | Interface に Flag ボタン。本家と同じく `.gradio/flagged/dataset1.csv`（ラベル列＋timestamp、ファイルはコピー） |
 | カメラ・マイク | Image は Upload と Webcam（撮影）、Audio は Upload と Microphone（録音）を切り替えられる |
 | 検出結果 | `gr::AnnotatedImageValue(pixels).box(x1, y1, x2, y2, "label")` / `.mask(...)`。凡例にマウスを乗せるとそのラベルだけ強調 |
 | `gr::State` | セッションごとの値。入力として受け取り、出力として返すと次の呼び出しへ引き継がれる（gradio_client ではサーバ側のセッションに保存） |
@@ -137,6 +141,7 @@ MSVC では `/utf-8 /bigobj` を付ける（CMake の `gradio_cpp` ターゲッ�
 * `examples/components.cpp` — Tabs / Accordion / Dropdown / Radio / CheckboxGroup / Gallery / `gr::update`
 * `examples/extras.cpp` — State / Progress / Examples / Code / Dataframe / Label / Audio
 * `examples/vision.cpp` — Webcam / アップロード → AnnotatedImage（枠）＋ LinePlot ＋ BarPlot
+* `examples/studio.cpp` — ImageEditor / Model3D（トーラス生成）/ ScatterPlot
 * `examples/chat_echo.cpp` — LLM なしの ChatInterface（受け取ったものを返す）
 * `examples/llama_chat.cpp` — llama-server につなぐ画像付きチャット
 * `examples/llama_local.cpp` — llama.cpp（libmtmd）を直接リンクした画像付きチャット（`-DGRADIO_LLAMA_CPP=...` のときだけビルド）

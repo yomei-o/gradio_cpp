@@ -76,6 +76,17 @@ footer a { color: var(--muted); cursor: pointer; }
 #api.open { display: block; }
 #api pre { background: var(--panel); border: 1px solid var(--border); padding: 10px; border-radius: 6px; overflow: auto; font-size: 13px; }
 .hidden { display: none !important; }
+.ed-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+.ed-tools .sw { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0; }
+.ed-tools .sw.sel { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
+.ed-tools button.t { font: inherit; padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--secondary); color: var(--text); cursor: pointer; }
+.ed-tools input[type=range] { width: 120px; }
+.ed-tools button.t.sel { border-color: var(--primary); color: var(--primary); }
+.ed-stage { position: relative; display: inline-block; align-self: flex-start; max-width: 100%; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+  background: repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
+.ed-stage canvas { display: block; max-width: 100%; touch-action: none; }
+.ed-stage canvas.draw { position: absolute; left: 0; top: 0; width: 100%; height: 100%; cursor: crosshair; }
+canvas.m3d { width: 100%; height: 360px; display: block; background: var(--panel); border-radius: 6px; cursor: grab; }
 .ann { position: relative; display: inline-block; max-width: 100%; }
 .ann img { display: block; max-width: 100%; max-height: 520px; }
 .ann img.ov { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transition: opacity .15s; pointer-events: none; }
@@ -533,8 +544,9 @@ const RENDER = {
     set(p.value);
     return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
   },
-  lineplot(c, parent) { return plot(c, parent, "line"); },
-  barplot(c, parent) { return plot(c, parent, "bar"); },
+  nativeplot(c, parent) { return plot(c, parent); },
+  imageeditor(c, parent) { return imageEditor(c, parent); },
+  model3d(c, parent) { return model3d(c, parent); },
   button(c, parent) {
     const p = c.props, btn = el("button", "btn " + (p.variant || "secondary"), parent), ev = emitter(c.id);
     btn.textContent = p.value; if (p.visible === false) btn.classList.add("hidden");
@@ -550,7 +562,7 @@ const RENDER = {
 };
 
 // Minimal SVG charts over a {headers, data} value.
-function plot(c, parent, type) {
+function plot(c, parent) {
   const p = c.props, b = block(c, parent), box = el("div", "", b);
   const NS = "http://www.w3.org/2000/svg", W = 640, H = 300, L = 48, R = 12, T = 12, B = 34;
   const mk = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; };
@@ -559,7 +571,8 @@ function plot(c, parent, type) {
   const set = v => {
     val = v; box.innerHTML = "";
     if (!v || !v.data || !v.data.length) return;
-    const hi = n => v.headers.indexOf(n), xi = hi(p.x), yi = hi(p.y), ci = p.color ? hi(p.color) : -1;
+    const cols = v.columns || v.headers || [], type = v.mark || p._mark || "line";
+    const hi = n => cols.indexOf(n), xi = hi(p.x), yi = hi(p.y), ci = p.color ? hi(p.color) : -1;
     if (xi < 0 || yi < 0) { box.textContent = `columns "${p.x}" / "${p.y}" not found`; return; }
     const svg = mk("svg", { viewBox: `0 0 ${W} ${H}`, class: "plot" }, box);
     const ys = v.data.map(r => Number(r[yi])), ymin = Math.min(0, ...ys), ymax = Math.max(...ys, ymin + 1e-9);
@@ -583,13 +596,126 @@ function plot(c, parent, type) {
       const groups = {};
       v.data.forEach((r, i) => (groups[ci >= 0 ? r[ci] : ""] ??= []).push([xs[i], Number(r[yi])]));
       Object.entries(groups).forEach(([g, pts], k) => {
-        mk("polyline", { points: pts.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "), fill: "none", stroke: pal[k % pal.length], "stroke-width": 2 }, svg);
+        if (type === "point") pts.forEach(([x, y]) => mk("circle", { cx: sx(x), cy: sy(y), r: 4, fill: pal[k % pal.length], "fill-opacity": 0.8 }, svg));
+        else mk("polyline", { points: pts.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "), fill: "none", stroke: pal[k % pal.length], "stroke-width": 2 }, svg);
         if (g) mk("text", { x: W - R, y: T + 12 + 14 * k, "text-anchor": "end", fill: pal[k % pal.length] }, svg).textContent = g;
       });
       for (const [x, i] of [[xmin, 0], [xmax, v.data.length - 1]])
         mk("text", { x: sx(x), y: H - B + 16, "text-anchor": "middle" }, svg).textContent = numeric ? +x.toPrecision(4) : v.data[i][xi];
     }
     mk("text", { x: (L + W - R) / 2, y: H - 4, "text-anchor": "middle" }, svg).textContent = p.x;
+  };
+  set(p.value);
+  return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
+}
+
+// ImageEditor: upload a background, paint on a transparent layer; the value is
+// {background, layers: [layer], composite}, each uploaded as a PNG when read.
+function imageEditor(c, parent) {
+  const p = c.props, b = block(c, parent), ev = emitter(c.id);
+  const tools = el("div", "ed-tools", b), stage = el("div", "ed-stage", b);
+  const bg = el("canvas", "", stage), dr = el("canvas", "draw", stage);
+  const picker = el("input", "", b); picker.type = "file"; picker.accept = "image/*"; picker.hidden = true;
+  let color = (p.brush_colors || ["#000000"])[0], size = 8, erase = false, dirty = false, cached = null, value = null;
+  const setSize = (w, h) => { for (const cv of [bg, dr]) { cv.width = w; cv.height = h; } };
+  const blank = () => { setSize(512, 384); const g = bg.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, 512, 384); };
+  if (p.interactive) {
+    const up = el("button", "t", tools); up.type = "button"; up.textContent = "Upload"; up.onclick = () => picker.click();
+    const sws = (p.brush_colors || ["#000000"]).map(col => { const sw = el("button", "sw", tools); sw.type = "button"; sw.style.background = col;
+      sw.title = col; sw.onclick = () => { color = col; erase = false; sel(); }; sw._c = col; return sw; });
+    const er = el("button", "t", tools); er.type = "button"; er.textContent = "Eraser"; er.onclick = () => { erase = true; sel(); };
+    const sz = el("input", "", tools); sz.type = "range"; sz.min = 1; sz.max = 64; sz.value = size; sz.oninput = () => size = +sz.value; sz.title = "brush size";
+    const cl = el("button", "t", tools); cl.type = "button"; cl.textContent = "Clear drawing";
+    cl.onclick = () => { dr.getContext("2d").clearRect(0, 0, dr.width, dr.height); dirty = true; ev.fire("change"); };
+    const sel = () => { sws.forEach(sw => sw.classList.toggle("sel", !erase && sw._c === color)); er.classList.toggle("sel", erase); };
+    sel();
+    picker.onchange = () => { const f = picker.files[0]; picker.value = ""; if (!f) return;
+      const im = new Image(); im.onload = () => { setSize(im.naturalWidth, im.naturalHeight); bg.getContext("2d").drawImage(im, 0, 0); dirty = true; ev.fire("upload"); ev.fire("change"); };
+      im.src = URL.createObjectURL(f); };
+    let last = null;
+    const pos = e => { const r = dr.getBoundingClientRect(); return [(e.clientX - r.left) * dr.width / r.width, (e.clientY - r.top) * dr.height / r.height]; };
+    const line = (a, z) => { const g = dr.getContext("2d"); g.globalCompositeOperation = erase ? "destination-out" : "source-over";
+      g.strokeStyle = color; g.lineWidth = size * dr.width / dr.getBoundingClientRect().width; g.lineCap = g.lineJoin = "round";
+      g.beginPath(); g.moveTo(...a); g.lineTo(...z); g.stroke(); };
+    dr.addEventListener("pointerdown", e => { dr.setPointerCapture(e.pointerId); last = pos(e); line(last, last); dirty = true; });
+    dr.addEventListener("pointermove", e => { if (!last) return; const q = pos(e); line(last, q); last = q; });
+    const end = () => { if (last) { last = null; ev.fire("change"); } };
+    dr.addEventListener("pointerup", end); dr.addEventListener("pointercancel", end);
+  }
+  const blob = cv => new Promise(r => cv.toBlob(r, "image/png"));
+  const get = async () => {
+    if (!dirty && cached) return cached;
+    const comp = document.createElement("canvas"); comp.width = bg.width; comp.height = bg.height;
+    const g = comp.getContext("2d"); g.drawImage(bg, 0, 0); g.drawImage(dr, 0, 0);
+    const [fb, fl, fc] = await Promise.all([blob(bg), blob(dr), blob(comp)]);
+    const [vb, vl, vc] = await Promise.all([upload(new File([fb], "background.png", { type: "image/png" })),
+      upload(new File([fl], "layer.png", { type: "image/png" })), upload(new File([fc], "composite.png", { type: "image/png" }))]);
+    dirty = false;
+    return cached = { background: vb, layers: [vl], composite: vc, id: null };
+  };
+  const set = v => {
+    value = v; cached = null; dirty = true;
+    const img = v && (v.composite || v.background);
+    if (!img) { blank(); dr.getContext("2d").clearRect(0, 0, dr.width, dr.height); return; }
+    const im = new Image(); im.onload = () => { setSize(im.naturalWidth, im.naturalHeight); bg.getContext("2d").drawImage(im, 0, 0); };
+    im.src = img.url;
+  };
+  set(p.value);
+  return { get: p.interactive ? get : () => value, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
+}
+
+// Model3D: a small canvas viewer for .obj and .stl (drag to rotate, wheel to zoom).
+function model3d(c, parent) {
+  const p = c.props, b = block(c, parent), box = el("div", "", b);
+  let val = null;
+  const parseObj = t => { const v = [], f = [];
+    for (const l of t.split("\n")) { const a = l.trim().split(/\s+/);
+      if (a[0] === "v") v.push(a.slice(1, 4).map(Number));
+      else if (a[0] === "f") { const ids = a.slice(1).map(x => { const i = parseInt(x); return i < 0 ? v.length + i : i - 1; });
+        for (let k = 1; k + 1 < ids.length; k++) f.push([ids[0], ids[k], ids[k + 1]]); } }
+    return f.map(t => t.map(i => v[i])); };
+  const parseStl = buf => { const u8 = new Uint8Array(buf), head = new TextDecoder().decode(u8.slice(0, 256));
+    const dv = new DataView(buf), n = buf.byteLength >= 84 ? dv.getUint32(80, true) : 0;
+    if (head.startsWith("solid") && 84 + n * 50 !== buf.byteLength) {
+      const vs = [...new TextDecoder().decode(u8).matchAll(/vertex\s+(\S+)\s+(\S+)\s+(\S+)/g)].map(m => [+m[1], +m[2], +m[3]]);
+      const t = []; for (let i = 0; i + 2 < vs.length; i += 3) t.push([vs[i], vs[i + 1], vs[i + 2]]); return t; }
+    const t = []; for (let i = 0; i < n; i++) { const o = 84 + i * 50 + 12, q = k => [0, 1, 2].map(j => dv.getFloat32(o + k * 12 + j * 4, true)); t.push([q(0), q(1), q(2)]); }
+    return t; };
+  const view = tris => {
+    const cv = el("canvas", "m3d", box), g = cv.getContext("2d");
+    const all = tris.flat(), lo = [0, 1, 2].map(k => Math.min(...all.map(v => v[k]))), hi = [0, 1, 2].map(k => Math.max(...all.map(v => v[k])));
+    const ctr = lo.map((l, k) => (l + hi[k]) / 2), rad = Math.max(...hi.map((h, k) => h - lo[k])) / 2 || 1;
+    let yaw = 0.6, pitch = 0.4, zoom = 1, drag = null;
+    const draw = () => {
+      const W = cv.width = cv.clientWidth * devicePixelRatio, H = cv.height = cv.clientHeight * devicePixelRatio;
+      g.clearRect(0, 0, W, H);
+      const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), sc = Math.min(W, H) * 0.42 * zoom / rad;
+      const tf = v => { const x = v[0] - ctr[0], y = v[1] - ctr[1], z = v[2] - ctr[2];
+        const x1 = cy * x + sy * z, z1 = -sy * x + cy * z, y2 = cp * y - sp * z1, z2 = sp * y + cp * z1; return [W / 2 + x1 * sc, H / 2 - y2 * sc, z2 * sc]; };
+      const ps = tris.map(t => t.map(tf)).map(t => { const [a, b2, c2] = t, ux = b2[0] - a[0], uy = b2[1] - a[1], uz = b2[2] - a[2], vx = c2[0] - a[0], vy = c2[1] - a[1], vz = c2[2] - a[2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, len = Math.hypot(nx, ny, nz) || 1;
+        return { t, z: (a[2] + b2[2] + c2[2]) / 3, l: Math.abs(nz / len) }; }).sort((a, b2) => a.z - b2.z);
+      for (const q of ps) { const s2 = Math.round(90 + 150 * q.l); g.fillStyle = `rgb(${s2},${Math.round(s2 * 0.75)},${Math.round(s2 * 0.45)})`;
+        g.beginPath(); g.moveTo(q.t[0][0], q.t[0][1]); g.lineTo(q.t[1][0], q.t[1][1]); g.lineTo(q.t[2][0], q.t[2][1]); g.closePath(); g.fill(); }
+    };
+    cv.onpointerdown = e => { drag = [e.clientX, e.clientY, yaw, pitch]; cv.setPointerCapture(e.pointerId); };
+    cv.onpointermove = e => { if (!drag) return; yaw = drag[2] + (e.clientX - drag[0]) * 0.01; pitch = drag[3] + (e.clientY - drag[1]) * 0.01; draw(); };
+    cv.onpointerup = () => drag = null;
+    cv.onwheel = e => { e.preventDefault(); zoom *= e.deltaY < 0 ? 1.1 : 1 / 1.1; draw(); };
+    requestAnimationFrame(draw);
+    cv.dataset.triangles = tris.length;
+  };
+  const set = async v => {
+    val = v; box.innerHTML = "";
+    if (!v) return;
+    const name = (v.orig_name || v.path || "").toLowerCase();
+    try {
+      const r = await fetch(v.url);
+      if (name.endsWith(".obj")) view(parseObj(await r.text()));
+      else if (name.endsWith(".stl")) view(parseStl(await r.arrayBuffer()));
+      else throw new Error("preview supports .obj and .stl");
+    } catch (e) { box.textContent = e.message + " "; }
+    const a = el("a", "filelink", box); a.href = v.url; a.download = v.orig_name || ""; a.textContent = v.orig_name || "download";
   };
   set(p.value);
   return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };

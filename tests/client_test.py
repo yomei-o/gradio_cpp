@@ -80,8 +80,19 @@ def main():
         ann, hist, top = c.predict(handle_file(png), 4, 3, api_name="/predict")
         assert Path(ann["image"]).exists() and len(ann["annotations"]) == 4, ann
         assert all(Path(a["image"]).exists() for a in ann["annotations"])
-        assert hist["headers"] == ["luminance", "pixels"] and len(top["data"]) == 3, top
+        assert hist["columns"] == ["luminance", "pixels"] and hist["mark"] == "line" and len(top["data"]) == 3, top
         print("vision ok:", [a["label"] for a in ann["annotations"]])
+    elif which == "studio":
+        f = handle_file(png)
+        mask, info = c.predict({"background": f, "layers": [handle_file(png)], "composite": handle_file(png)},
+                               api_name="/extract")
+        assert Path(mask).exists() and "pixels" in info, info
+        obj = c.predict(24, api_name="/torus")
+        assert Path(obj).read_text().count("\nf ") == 24 * 12, obj
+        plot = c.predict(50, api_name="/scatter")
+        assert plot["mark"] == "point" and plot["columns"] == ["x", "y", "arm"] and len(plot["data"]) == 50, plot
+        assert plot["datatypes"] == {"x": "quantitative", "y": "quantitative", "arm": "nominal"}, plot["datatypes"]
+        print("studio ok:", info, "; torus faces ok; plot", plot["mark"], plot["datatypes"])
     elif which == "extras":
         # gr::State lives in the session: three calls count 1, 2, 3; a new client starts again
         assert [c.predict(api_name="/add_one") for _ in range(3)] == ["1", "2", "3"]
