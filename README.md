@@ -65,6 +65,8 @@ Ollama や vLLM など、OpenAI 互換のサーバならそのまま使える（
 | `GET /gradio_api/info` | エンドポイントと引数の説明 |
 | `POST /gradio_api/call/<api_name>` | `{"data": [...]}` → `{"event_id": ...}` |
 | `GET /gradio_api/call/<api_name>/<event_id>` | SSE で `generating` / `complete` / `error` |
+| `POST /gradio_api/queue/join` + `GET /gradio_api/queue/data` | gradio_client が使う sse_v3 の queue プロトコル |
+| `POST /gradio_api/cancel` | queue で実行中のイベントを止める |
 | `POST /gradio_api/upload` | multipart の `files` → サーバ側パスの配列 |
 | `GET /gradio_api/file=<path>` | アップロード／出力ファイルだけを返す（それ以外は 403） |
 
@@ -76,7 +78,22 @@ curl -X POST http://127.0.0.1:7860/gradio_api/call/predict -s -H "Content-Type: 
   | read EVENT_ID; curl -N http://127.0.0.1:7860/gradio_api/call/predict/$EVENT_ID
 ```
 
-Python の `gradio_client` から呼ぶための queue プロトコル（`/gradio_api/queue/join` ほか）はまだない。
+### Python の gradio_client から
+
+本家と同じ queue プロトコル（sse_v3：`/gradio_api/queue/join`、`/gradio_api/queue/data`、`/gradio_api/cancel`）も
+話すので、公式の `gradio_client` からそのまま呼べる：
+
+```python
+from gradio_client import Client, handle_file
+c = Client("http://127.0.0.1:7860/")
+c.predict("World", 3, api_name="/predict")                     # 位置引数でもキーワード引数でも
+c.predict(handle_file("cat.png"), 50, api_name="/predict")     # ファイルは自動でアップロード、結果は自動でダウンロード
+for partial in c.submit("hi", 4, api_name="/stream"): ...      # ストリーミング（差分で届き、client 側で組み立てられる）
+c.predict({"text": "これは何？", "files": [handle_file("cat.png")]}, api_name="/chat")   # ChatInterface
+```
+
+gradio_client 2.7.2 で確認済み。`/config` の `version` は、話しているプロトコルの水準として "5.0.0" を名乗る
+（gradio_cpp 自身の版は `gradio_cpp_version`）。
 
 ## ビルド
 
@@ -108,6 +125,7 @@ MSVC では `/utf-8 /bigobj` を付ける（CMake の `gradio_cpp` ターゲッ�
 ```sh
 bash tests/run_all.sh some.png                                  # build/Release の exe を使う
 LLM=http://127.0.0.1:8081 bash tests/run_all.sh some.png        # 本物の llama-server も
+GC_PYTHON=venv/Scripts/python bash tests/run_all.sh some.png    # gradio_client のテストも（tests/client_test.py）
 ```
 
 個別に、サンプルを起動してから：

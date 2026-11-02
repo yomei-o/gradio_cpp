@@ -25,6 +25,8 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <deque>
+#include <thread>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -47,7 +49,8 @@ namespace gr {
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
-inline constexpr const char* version = "0.1.0";
+inline constexpr const char* version = "0.4.0";
+inline constexpr const char* gradio_api_version = "5.0.0";
 
 // Throw from a handler to show the message to the user (like gr.Error).
 struct Error : std::runtime_error {
@@ -767,7 +770,12 @@ public:
                             {"trigger_only_on_success", d.trigger_after >= 0},
                             {"types", {{"generator", d.streaming}, {"cancel", !backend}}}});
         }
-        return {{"version", std::string("gradio_cpp-") + version},
+        // "version" is the Gradio API level we speak (gradio_client parses it as a version
+        // number); our own version is in "gradio_cpp_version".
+        return {{"version", gradio_api_version},
+                {"gradio_cpp_version", version},
+                {"protocol", "sse_v3"},
+                {"connect_heartbeat", false},
                 {"mode", mode_},
                 {"title", title_},
                 {"api_prefix", "/gradio_api"},
@@ -781,7 +789,15 @@ public:
         for (auto& d : deps_) {
             if (!d.show_api || !d.fn) continue;
             json params = json::array(), rets = json::array();
-            for (int id : d.inputs) params.push_back(param_info(id, true));
+            std::set<std::string> used;
+            for (size_t k = 0; k < d.inputs.size(); ++k) {
+                json pi = param_info(d.inputs[k], true);
+                std::string name = parameter_name(pi["label"].is_string() ? pi["label"].get<std::string>() : "", k);
+                while (used.count(name)) name += "_";
+                used.insert(name);
+                pi["parameter_name"] = name;
+                params.push_back(pi);
+            }
             for (int id : d.outputs) rets.push_back(param_info(id, false));
             named["/" + d.api_name] = {{"parameters", params}, {"returns", rets}};
         }
@@ -835,6 +851,7 @@ public:
                 return true;
             });
         });
+        mount_queue(svr);
         svr.Post("/gradio_api/upload", [](const httplib::Request& req, httplib::Response& res) {
             json paths = json::array();
             auto range = req.files.equal_range("files");
@@ -957,6 +974,23 @@ private:
         } else if (type == "checkbox") {
             t = {{"type", "boolean"}};
             py = {{"type", "bool"}, {"description", ""}};
+        } else if ((type == "dropdown" && !(c && c->props.value("multiselect", false))) || type == "radio") {
+            json e = json::array();
+            for (auto& ch : c->props.value("choices", json::array())) e.push_back(ch[1]);
+            t = {{"type", "string"}, {"enum", e}};
+            py = {{"type", "Literal[" + e.dump().substr(1, e.dump().size() - 2) + "]"}, {"description", ""}};
+        } else if (type == "dropdown" || type == "checkboxgroup") {
+            t = {{"type", "array"}, {"items", {{"type", "string"}}}};
+            py = {{"type", "list[str]"}, {"description", ""}};
+        } else if (type == "multimodaltextbox") {
+            t = {{"type", "object"}, {"properties", {{"text", {{"type", "string"}}}, {"files", {{"type", "array"}}}}}};
+            py = {{"type", "dict(text: str, files: list[filepath])"}, {"description", ""}};
+        } else if (type == "chatbot") {
+            t = {{"type", "array"}};
+            py = {{"type", "list[dict(role, content, metadata)]"}, {"description", ""}};
+        } else if (type == "gallery") {
+            t = {{"type", "array"}};
+            py = {{"type", "list[dict(image: filepath, caption: str | None)]"}, {"description", ""}};
         } else if (is_file_type(type)) {
             t = {{"type", "object"}, {"additionalProperties", false}, {"title", "FileData"},
                  {"properties", {{"path", {{"type", "string"}}}, {"url", {{"type", "string"}}},
@@ -978,6 +1012,16 @@ private:
         return info;
     }
 
+    static std::string parameter_name(const std::string& label, size_t index) {
+        std::string n;
+        for (unsigned char ch : label) {
+            if (std::isalnum(ch)) n += (char)std::tolower(ch);
+            else if (ch == ' ' || ch == '_' || ch == '-') n += '_';
+        }
+        if (n.empty() || std::isdigit((unsigned char)n[0])) n = "param_" + std::to_string(index);
+        return n;
+    }
+
     static json example_input(const Component* c) {
         if (!c) return nullptr;
         const std::string& t = c->type;
@@ -985,6 +1029,12 @@ private:
         if (t == "number") return 3;
         if (t == "slider") return c->props.value("minimum", 0.0);
         if (t == "checkbox") return true;
+        if ((t == "dropdown" || t == "radio") && !c->props.value("choices", json::array()).empty()) {
+            json v = c->props["choices"][0][1];
+            return c->props.value("multiselect", false) ? json::array({v}) : v;
+        }
+        if (t == "checkboxgroup") return json::array();
+        if (t == "multimodaltextbox") return {{"text", "Hello!!"}, {"files", json::array()}};
         if (is_file_type(t))
             return {{"path", "https://raw.githubusercontent.com/gradio-app/gradio/main/test/test_files/bus.png"},
                     {"meta", {{"_type", "gradio.FileData"}}}};
@@ -1016,45 +1066,227 @@ private:
         }
     }
 
+    // Run a handler: input checks, concurrency limit, streaming. Returns the final
+    // outputs. emit may throw detail::Cancelled to abort.
+    json execute(const Dep& d, const json& data, const Emit& emit) {
+        check_input_files(d, data);
+        struct Guard {
+            detail::Semaphore* s;
+            ~Guard() {
+                if (s) s->release();
+            }
+        } guard{nullptr};
+        if (d.sem) {
+            d.sem->acquire();
+            guard.s = d.sem.get();
+        }
+        json last = json::array();
+        json out = d.fn(data, [&](const json& o) {
+            last = o;
+            emit(o);
+        });
+        return out.is_null() ? last : out;
+    }
+
+    static std::string dump(const json& j) { return j.dump(-1, ' ', false, json::error_handler_t::replace); }
+
+    // /gradio_api/call/<name>/<id>: event-named SSE (generating / complete / error).
     void run_event(const Event& ev, httplib::DataSink& sink) {
-        const Dep& d = deps_[ev.dep];
         auto send = [&](const std::string& event, const json& data) {
-            std::string msg = "event: " + event + "\ndata: " + data.dump(-1, ' ', false, json::error_handler_t::replace) + "\n\n";
+            std::string msg = "event: " + event + "\ndata: " + dump(data) + "\n\n";
             if (!sink.write(msg.data(), msg.size())) throw detail::Cancelled{};
         };
-        json last = json::array();
-        bool locked = false;
         try {
-            check_input_files(d, ev.data);
-            if (d.sem) {
-                d.sem->acquire();
-                locked = true;
-            }
-            json out = d.fn(ev.data, [&](const json& o) {
-                last = o;
-                send("generating", o);
-            });
-            if (locked) d.sem->release();
-            locked = false;
-            send("complete", out.is_null() ? last : out);
+            json out = execute(deps_[ev.dep], ev.data, [&](const json& o) { send("generating", o); });
+            send("complete", out);
         } catch (const detail::Cancelled&) {
-            if (locked) d.sem->release();
-            sink.done();
-            return;
         } catch (const std::exception& e) {
-            if (locked) d.sem->release();
             try {
                 send("error", json(std::string(e.what())));
             } catch (...) {
             }
         } catch (...) {
-            if (locked) d.sem->release();
             try {
                 send("error", json("unknown error"));
             } catch (...) {
             }
         }
         sink.done();
+    }
+
+    // ---- Gradio queue protocol (sse_v3), used by gradio_client ----
+    struct Session {
+        std::mutex m;
+        std::condition_variable cv;
+        std::deque<json> q;
+        int pending = 0;
+        std::map<std::string, std::shared_ptr<std::atomic<bool>>> running;  // event_id -> cancel flag
+        std::chrono::steady_clock::time_point touched = std::chrono::steady_clock::now();
+    };
+
+    std::shared_ptr<Session> session(const std::string& hash, bool create) {
+        std::lock_guard<std::mutex> lk(sessions_m_);
+        auto now = std::chrono::steady_clock::now();
+        auto it = sessions_.find(hash);
+        if (it != sessions_.end()) {
+            it->second->touched = now;
+            return it->second;
+        }
+        if (!create) return nullptr;
+        for (auto i = sessions_.begin(); i != sessions_.end();) {  // drop idle sessions
+            bool idle;
+            {
+                std::lock_guard<std::mutex> sl(i->second->m);
+                idle = i->second->pending == 0 && now - i->second->touched > std::chrono::hours(1);
+            }
+            i = idle ? sessions_.erase(i) : std::next(i);
+        }
+        auto s = std::make_shared<Session>();
+        sessions_[hash] = s;
+        return s;
+    }
+
+    static void push(Session& s, json msg) {
+        {
+            std::lock_guard<std::mutex> lk(s.m);
+            s.q.push_back(std::move(msg));
+        }
+        s.cv.notify_all();
+    }
+
+    // Gradio streams generator outputs as diffs after the first message.
+    static json diff(const json& prev, const json& cur) {
+        if (prev.is_string() && cur.is_string()) {
+            const std::string &a = prev.get_ref<const std::string&>(), &b = cur.get_ref<const std::string&>();
+            if (b.size() >= a.size() && b.compare(0, a.size(), a) == 0)
+                return json::array({json::array({"append", json::array(), b.substr(a.size())})});
+        }
+        return json::array({json::array({"replace", json::array(), cur})});
+    }
+
+    void run_queued(size_t dep, json data, std::string event_id, std::shared_ptr<Session> s,
+                    std::shared_ptr<std::atomic<bool>> cancelled) {
+        const Dep& d = deps_[dep];
+        push(*s, {{"msg", "process_starts"}, {"event_id", event_id}, {"eta", nullptr}});
+        json sent;
+        json done;
+        try {
+            json out = execute(d, data, [&](const json& o) {
+                if (*cancelled) throw detail::Cancelled{};
+                json payload = o;
+                if (sent.is_array() && sent.size() == o.size()) {
+                    payload = json::array();
+                    for (size_t i = 0; i < o.size(); ++i) payload.push_back(diff(sent[i], o[i]));
+                }
+                sent = o;
+                push(*s, {{"msg", "process_generating"}, {"event_id", event_id}, {"success", true},
+                          {"output", {{"data", payload}, {"is_generating", true}}}});
+            });
+            done = {{"msg", "process_completed"}, {"event_id", event_id}, {"success", true},
+                    {"output", {{"data", out}, {"is_generating", false}}}};
+        } catch (const detail::Cancelled&) {
+            done = {{"msg", "process_completed"}, {"event_id", event_id}, {"success", false},
+                    {"output", {{"error", "cancelled"}}}};
+        } catch (const std::exception& e) {
+            done = {{"msg", "process_completed"}, {"event_id", event_id}, {"success", false},
+                    {"output", {{"error", std::string(e.what())}}}};
+        } catch (...) {
+            done = {{"msg", "process_completed"}, {"event_id", event_id}, {"success", false},
+                    {"output", {{"error", "unknown error"}}}};
+        }
+        {
+            std::lock_guard<std::mutex> lk(s->m);
+            s->q.push_back(std::move(done));
+            s->running.erase(event_id);
+            --s->pending;
+        }
+        s->cv.notify_all();
+    }
+
+    void mount_queue(httplib::Server& svr) {
+        svr.Post("/gradio_api/queue/join", [this](const httplib::Request& req, httplib::Response& res) {
+            json body = json::parse(req.body, nullptr, false);
+            auto bad = [&](const std::string& why) {
+                res.status = 422;
+                res.set_content(json{{"detail", why}}.dump(), "application/json");
+            };
+            if (body.is_discarded() || !body.is_object()) return bad("invalid JSON");
+            if (!body.contains("fn_index") || !body["fn_index"].is_number_integer()) return bad("fn_index required");
+            if (!body.contains("session_hash") || !body["session_hash"].is_string()) return bad("session_hash required");
+            long long fi = body["fn_index"].get<long long>();
+            if (fi < 0 || fi >= (long long)deps_.size() || !deps_[(size_t)fi].fn) return bad("invalid fn_index");
+            json data = body.value("data", json::array());
+            if (!data.is_array()) return bad("data must be a list");
+            std::string event_id = detail::random_hex(32);
+            auto s = session(body["session_hash"].get<std::string>(), true);
+            auto flag = std::make_shared<std::atomic<bool>>(false);
+            {
+                std::lock_guard<std::mutex> lk(s->m);
+                ++s->pending;
+                s->running[event_id] = flag;
+                s->q.push_back({{"msg", "estimation"}, {"event_id", event_id}, {"rank", 0},
+                                {"queue_size", s->pending}, {"rank_eta", nullptr}});
+            }
+            s->cv.notify_all();
+            std::thread(&Blocks::run_queued, this, (size_t)fi, std::move(data), event_id, s, flag).detach();
+            res.set_content(json{{"event_id", event_id}}.dump(), "application/json");
+        });
+        svr.Get("/gradio_api/queue/data", [this](const httplib::Request& req, httplib::Response& res) {
+            auto s = session(req.get_param_value("session_hash"), false);
+            res.set_header("Cache-Control", "no-cache");
+            res.set_chunked_content_provider("text/event-stream", [s](size_t, httplib::DataSink& sink) {
+                auto write = [&](const json& m) {
+                    std::string line = "data: " + dump(m) + "\n\n";
+                    return sink.write(line.data(), line.size());
+                };
+                if (!s) {
+                    write({{"msg", "close_stream"}});
+                    sink.done();
+                    return true;
+                }
+                for (;;) {
+                    std::deque<json> batch;
+                    bool finished = false;
+                    {
+                        std::unique_lock<std::mutex> lk(s->m);
+                        s->cv.wait_for(lk, std::chrono::seconds(15), [&] { return !s->q.empty() || s->pending == 0; });
+                        batch.swap(s->q);
+                        finished = s->pending == 0;
+                    }
+                    bool ok = true;
+                    for (auto& m : batch) ok = ok && write(m);
+                    if (ok && batch.empty() && !finished) ok = write({{"msg", "heartbeat"}});
+                    if (!ok) {  // client went away: stop its jobs
+                        std::lock_guard<std::mutex> lk(s->m);
+                        for (auto& [id, f] : s->running) *f = true;
+                        return false;
+                    }
+                    if (finished) {
+                        std::lock_guard<std::mutex> lk(s->m);
+                        if (s->pending == 0 && s->q.empty()) break;
+                    }
+                }
+                write({{"msg", "close_stream"}});
+                sink.done();
+                return true;
+            });
+        });
+        svr.Post("/gradio_api/cancel", [this](const httplib::Request& req, httplib::Response& res) {
+            json body = json::parse(req.body, nullptr, false);
+            bool found = false;
+            if (!body.is_discarded() && body.is_object() && body.contains("session_hash") && body.contains("event_id") &&
+                body["session_hash"].is_string() && body["event_id"].is_string()) {
+                if (auto s = session(body["session_hash"].get<std::string>(), false)) {
+                    std::lock_guard<std::mutex> lk(s->m);
+                    auto it = s->running.find(body["event_id"].get<std::string>());
+                    if (it != s->running.end()) {
+                        *it->second = true;
+                        found = true;
+                    }
+                }
+            }
+            res.set_content(json{{"success", found}}.dump(), "application/json");
+        });
     }
 
     static void not_found(httplib::Response& res) {
@@ -1071,6 +1303,8 @@ private:
     std::vector<Dep> deps_;
     std::mutex events_m_;
     std::map<std::string, Event> events_;
+    std::mutex sessions_m_;
+    std::map<std::string, std::shared_ptr<Session>> sessions_;
 };
 
 // ---------------------------------------------------------------------------

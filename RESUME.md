@@ -17,8 +17,14 @@
 * フロントは `frontend/index.html` が正本。`tools/embed_frontend.py` で 12KB ごとの raw 文字列に分けて埋め込む
   （MSVC の文字列リテラル長制限のため）。
 * Gradio 互換の現状：`/config`、`/gradio_api/info`、`/gradio_api/call/*`（SSE）、`/gradio_api/upload`、
-  `/gradio_api/file=` は実装済み。`gradio_client` が使う `/gradio_api/queue/join` と
-  `/gradio_api/queue/data`（sse_v3）は未実装。
+  `/gradio_api/file=`、queue（sse_v3：`queue/join`、`queue/data`、`cancel`）。heartbeat は
+  `connect_heartbeat: false` にして使わせていない。
+* queue の要点（gradio_client 2.7.2 を読んで合わせた）：join は `{data, fn_index, session_hash}` を受けて
+  `{event_id}` を返す。data は session ごとに1本の SSE で、`data: {msg, event_id, ...}` を流す。
+  generating は1回目が全体、2回目以降は出力ごとの diff（`[["append"|"replace", [], v]]`）。
+  全イベントが終わったら `close_stream` を送って閉じる（sse_v3 の client は、自分からは閉じない）。
+  `/config` の `version` は packaging で解析されるので、数値の版でなければならない（"5.0.0"）。
+  4.29 より新しいと、client は `/gradio_api/cancel` を使う。
 
 ## 確認済み
 
@@ -40,8 +46,11 @@
   持っているので、描き直しても消えない。
 * `tests/run_all.sh` で7本（sepia, blocks, components, echo, stop, mock, llm）すべて PASS。
 
+2026-11-02 v0.4（gradio_client 互換）
+* `tests/client_test.py`：hello（位置引数・キーワード引数）、blocks（stream の差分の組み立て、cancel）、
+  sepia（handle_file のアップロード、出力のダウンロード、gr::Error → AppError）、components、chat（/chat に画像付き）。
+* `GC_PYTHON=... LLM=... tests/run_all.sh` で12本すべて PASS。
+
 ## 次にやること
 
-1. `gradio_client` 互換（`/gradio_api/queue/join` と `/gradio_api/queue/data` の sse_v3、`/gradio_api/info`
-   の細部）。Python の gradio_client から本当に呼んで確かめる。
-2. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。
+1. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。
