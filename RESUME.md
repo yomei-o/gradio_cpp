@@ -134,7 +134,12 @@
   /config の root も origin + root_path。
 * run_all：e2e 13本＋gradio_client 10本＋プロキシ 2本＋JS 4本、計29本 PASS。
 
+2026-11-02 v0.17（live / Timer）
+* `Interface::live()`：predict イベントに入力ごとの change トリガを足し、Submit を隠す（`Blocks::add_trigger`）。
+* `gr::Timer`：DOM なしの部品。フロントは setInterval で tick。update は props を変えて作り直す（dispose で古い interval を止める）。
+* run_all 31本 PASS。
+
 ## 次にやること
 
 1. clang / macOS でのビルド確認（Mac 側セッションがあれば）。
-2. 本家の残り：gr.Interface の live モード、Examples のキャッシュ、イベントの every=（定期実行）、gr.Timer。
+2. Examples のキャッシュ（起動時に計算しておく）、gr.Interface の batch。

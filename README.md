@@ -73,6 +73,7 @@ llama.cpp は b12032 で確認した。
 | `gr::State` | セッションごとの値。入力として受け取り、出力として返すと次の呼び出しへ引き継がれる（gradio_client ではサーバ側のセッションに保存） |
 | 進捗 | 最後の引数を `const gr::Progress&` にすると `progress(0.3, "step 3")` で進捗バーが出る（`Yield` にも `progress()`） |
 | Examples | `blocks.examples({{...}, ...}, {inputs})`、`Interface::examples(...)`。行をクリックすると入力欄に入る |
+| live / Timer | `interface.live()` で入力が変わるたびに実行（Submit なし）。`gr::Timer(秒)` は "tick" イベントを出し、`gr::update().set("active", false)` で止まる |
 | `gr::update()` | 値の代わりに返すと、そのコンポーネントの props を変える（`visible`、`choices`、`label` など） |
 | イベント | `then()`（成功後に続けて実行）、`cancel()`（実行中のイベントを止める） |
 | 型付きハンドラ | 引数の型（`std::string`, `double`, `int`, `bool`, `gr::FileData`, `gr::json`）に自動変換。複数出力は `std::tuple` で返す |
@@ -173,6 +174,7 @@ MSVC では `/utf-8 /bigobj` を付ける（CMake の `gradio_cpp` ターゲッ�
 * `examples/vision.cpp` — Webcam / アップロード → AnnotatedImage（枠）＋ LinePlot ＋ BarPlot
 * `examples/studio.cpp` — ImageEditor / Model3D（トーラス生成）/ ScatterPlot
 * `examples/login.cpp` — ログインが必要なアプリ（`--user` / `--password`）
+* `examples/live.cpp` — live モードの Interface（温度換算）
 * `examples/chat_echo.cpp` — LLM なしの ChatInterface（受け取ったものを返す）
 * `examples/llama_chat.cpp` — llama-server につなぐ画像付きチャット
 * `examples/llama_local.cpp` — llama.cpp（libmtmd）を直接リンクした画像付きチャット（`-DGRADIO_LLAMA_CPP=...` のときだけビルド）

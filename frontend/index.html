@@ -451,6 +451,15 @@ const RENDER = {
     set(p.value);
     return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
   },
+  timer(c) {
+    const p = c.props, ev = emitter(c.id);
+    let h = null;
+    const start = () => { clearInterval(h); h = null;
+      if (p.active !== false && p.value > 0) h = setInterval(() => ev.fire("tick"), p.value * 1000); };
+    start();
+    return { get: () => p.value, set: v => { p.value = v; start(); }, reset: () => {}, on: ev.on, loading: () => {},
+             dispose: () => clearInterval(h) };
+  },
   state(c) {
     let val = c.props.value;
     return { get: () => val, set: v => val = v, reset: () => val = c.props.value, on: emitter(c.id).on, loading: () => {} };
@@ -866,11 +875,18 @@ function applyUpdate(id, u) {
   const c = CBY[id]; if (!c) return;
   const { __type__, ...props } = u;
   const others = Object.keys(props).filter(k => k !== "value" && k !== "visible");
+  if (others.length && comps[id] && !roots[id]) {  // no DOM (timer, state): just re-create
+    comps[id].dispose?.();
+    Object.assign(c.props, props);
+    renderOne(c, document.createElement("div"));
+    return;
+  }
   if (others.length && comps[id] && roots[id]) {
     let cur = comps[id].get();
     if (cur instanceof Promise) cur = undefined;
     Object.assign(c.props, props);
     const tmp = document.createElement("div");
+    comps[id].dispose?.();
     const old = roots[id];
     const saved = c.props.value;
     if (!("value" in props) && cur !== undefined) c.props.value = cur;

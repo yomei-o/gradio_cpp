@@ -72,6 +72,22 @@ int main() {
                        {stats}, {total}, "sum_counts");
             demo.examples({{"def f(x):\n    return x * 2\n"}, {"const f = (x) => x * 2;\n"}}, {code});
         });
+        demo.tab("Timer", [&] {
+            // gr::Timer fires "tick"; returning gr::update().set("active", ...) to it stops / restarts it.
+            int timer = demo.add(gr::Timer(0.5));
+            int count = demo.add(gr::State(0));
+            int shown = demo.add(gr::Textbox("ticks"));
+            int stop = demo.add(gr::Button("Stop timer"));
+            int start = demo.add(gr::Button("Start timer"));
+            demo.on({{timer, "tick"}},
+                    [](int n) {
+                        ++n;
+                        return std::make_tuple(n, std::to_string(n));
+                    },
+                    {count}, {count, shown}, {"tick", 1, false});
+            demo.click(stop, [] { return gr::update().set("active", false); }, {}, {timer}, "stop_timer");
+            demo.click(start, [] { return gr::update().set("active", true); }, {}, {timer}, "start_timer");
+        });
         demo.tab("Audio", [&] {
             int in = demo.add(gr::Audio("input"));
             int out = demo.add(gr::Audio("same audio back"));

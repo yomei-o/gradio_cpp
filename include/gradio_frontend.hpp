@@ -460,6 +460,15 @@ const RENDER = {
     set(p.value);
     return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
   },
+  timer(c) {
+    const p = c.props, ev = emitter(c.id);
+    let h = null;
+    const start = () => { clearInterval(h); h = null;
+      if (p.active !== false && p.value > 0) h = setInterval(() => ev.fire("tick"), p.value * 1000); };
+    start();
+    return { get: () => p.value, set: v => { p.value = v; start(); }, reset: () => {}, on: ev.on, loading: () => {},
+             dispose: () => clearInterval(h) };
+  },
   state(c) {
     let val = c.props.value;
     return { get: () => val, set: v => val = v, reset: () => val = c.props.value, on: emitter(c.id).on, loading: () => {} };
@@ -584,13 +593,13 @@ function plot(c, parent) {
   const set = v => {
     val = v; box.innerHTML = "";
     if (!v || !v.data || !v.data.length) return;
-    const cols = v.columns || v.headers || [], type = v.mark || p._mark || "line";
+    const cols = v.columns || v.headers || [], type = v.mark || p._m)GRFE",
+        R"GRFE(ark || "line";
     const hi = n => cols.indexOf(n), xi = hi(p.x), yi = hi(p.y), ci = p.color ? hi(p.color) : -1;
     if (xi < 0 || yi < 0) { box.textContent = `columns "${p.x}" / "${p.y}" not found`; return; }
     const svg = mk("svg", { viewBox: `0 0 ${W} ${H}`, class: "plot" }, box);
     const ys = v.data.map(r => Number(r[yi])), ymin = Math.min(0, ...ys), ymax = Math.max(...ys, ymin + 1e-9);
-    const sy = y )GRFE",
-        R"GRFE(=> T + (H - T - B) * (1 - (y - ymin) / (ymax - ymin));
+    const sy = y => T + (H - T - B) * (1 - (y - ymin) / (ymax - ymin));
     mk("line", { x1: L, y1: T, x2: L, y2: H - B, class: "axis" }, svg);
     mk("line", { x1: L, y1: H - B, x2: W - R, y2: H - B, class: "axis" }, svg);
     for (const t of [ymin, (ymin + ymax) / 2, ymax]) {
@@ -746,7 +755,8 @@ function choiceGroup(c, parent, multi) {
   }
   const get = () => multi ? inputs.filter(i => i.checked).map(i => i._v) : (inputs.find(i => i.checked)?._v ?? null);
   const set = v => { const vs = multi ? (v || []) : [v]; inputs.forEach(i => i.checked = vs.includes(i._v)); };
-  set(p.value);
+  set(p.value))GRFE",
+        R"GRFE(;
   return { get, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
 }
 
@@ -755,8 +765,7 @@ function fileLike(c, parent, kind) {
   const p = c.props, b = block(c, parent), ev = emitter(c.id);
   const drop = el("div", "drop" + (p.interactive ? "" : " static"), b);
   let value = null, pending = null;
-  const picker = el("input", "", b); picker.type = "file"; picker.hidden = true;)GRFE",
-        R"GRFE(
+  const picker = el("input", "", b); picker.type = "file"; picker.hidden = true;
   if (kind !== "file") picker.accept = kind + "/*";
   const show = (v, localUrl) => {
     drop.innerHTML = "";
@@ -877,11 +886,18 @@ function applyUpdate(id, u) {
   const c = CBY[id]; if (!c) return;
   const { __type__, ...props } = u;
   const others = Object.keys(props).filter(k => k !== "value" && k !== "visible");
+  if (others.length && comps[id] && !roots[id]) {  // no DOM (timer, state): just re-create
+    comps[id].dispose?.();
+    Object.assign(c.props, props);
+    renderOne(c, document.createElement("div"));
+    return;
+  }
   if (others.length && comps[id] && roots[id]) {
     let cur = comps[id].get();
     if (cur instanceof Promise) cur = undefined;
     Object.assign(c.props, props);
     const tmp = document.createElement("div");
+    comps[id].dispose?.();
     const old = roots[id];
     const saved = c.props.value;
     if (!("value" in props) && cur !== undefined) c.props.value = cur;
@@ -991,7 +1007,8 @@ function apiDocs() {
         `  | awk -F'"' '{ print $4}' \\\n` +
         `  | read EVENT_ID; curl -N ${base}/gradio_api/call${name}/$EVENT_ID`;
       const ul = el("ul", "", wrap);
-      ep.parameters.forEach((p, i) => el("li", "", ul).textContent = `[${i}] ${p.label ?? ""} : ${p.python_type.type} (${p.component})`);
+      ep.)GRFE",
+        R"GRFE(parameters.forEach((p, i) => el("li", "", ul).textContent = `[${i}] ${p.label ?? ""} : ${p.python_type.type} (${p.component})`);
       el("p", "info", wrap).textContent = "Returns: " + ep.returns.map(r => `${r.label ?? ""} : ${r.python_type.type}`).join(", ");
     }
     box.scrollIntoView({ behavior: "smooth" });
@@ -1004,8 +1021,7 @@ function loginPage(detail) {
   const f = el("form", "login block", app);
   el("h2", "", f).textContent = "Login";
   if (detail && detail.auth_message) el("div", "msg", f).textContent = detail.auth_message;
-  const u = el("input", "", f); u.type = "text"; u.name = "user)GRFE",
-        R"GRFE(name"; u.placeholder = "username"; u.autocomplete = "username";
+  const u = el("input", "", f); u.type = "text"; u.name = "username"; u.placeholder = "username"; u.autocomplete = "username";
   const pw = el("input", "", f); pw.type = "password"; pw.name = "password"; pw.placeholder = "password"; pw.autocomplete = "current-password";
   pw.style.cssText = "width:100%;font:inherit;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--input);color:var(--text)";
   const err = el("div", "err", f);

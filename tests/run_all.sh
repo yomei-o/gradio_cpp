@@ -33,6 +33,8 @@ run vision -- $E2E vision "$OUT"
 run studio -- $E2E studio "$OUT"
 run login -- $E2E login
 run components -- $E2E theme
+run live -- $E2E live
+run extras -- $E2E timer
 
 # behind a reverse proxy under /gradio (LaunchOptions::root_path)
 MSYS_NO_PATHCONV=1 python tests/prefix_proxy.py 8096 /gradio > "$OUT/proxy.log" 2>&1 &

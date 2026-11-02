@@ -405,7 +405,7 @@ inline bool is_file_type(const std::string& t) {
     return t == "image" || t == "file" || t == "audio" || t == "video" || t == "model3d";
 }
 
-inline bool skip_api_type(const std::string& t) { return t == "state"; }
+inline bool skip_api_type(const std::string& t) { return t == "state" || t == "timer"; }
 
 inline bool is_layout_type(const std::string& t) {
     return t == "row" || t == "column" || t == "tabs" || t == "tabitem" || t == "accordion";
@@ -671,6 +671,12 @@ inline Update update(json value) { return Update{}.value(std::move(value)); }
 inline void to_json(json& j, const Update& u) {
     j = u.props;
     j["__type__"] = "update";
+}
+
+// Fires "tick" every `seconds` while active (gr.Timer): demo.on({{timer, "tick"}}, ...).
+// Stop / restart it by returning gr::update().set("active", false / true) to it.
+inline Component Timer(double seconds = 1.0, bool active = true) {
+    return Component("timer", {{"value", seconds}, {"active", active}});
 }
 
 // Resets the given components to their initial values (browser only).
@@ -1081,6 +1087,9 @@ public:
                       },
                       components, {}, {"flag", 0, false});
     }
+
+    // Add another trigger to an existing event.
+    void add_trigger(int event, int component, const std::string& name) { deps_.at(event).targets.push_back({component, name}); }
 
     // Run after event `after` finishes successfully (like Gradio's .then / .success).
     template <class F>
@@ -1933,9 +1942,18 @@ public:
         std::vector<int> all = in;
         all.insert(all.end(), out.begin(), out.end());
         blocks_.component(clear).set("components", all);
-        blocks_.on(targets, std::move(fn), in, out, {"predict"});
+        predict_ = blocks_.on(targets, std::move(fn), in, out, {"predict"});
+        submit_btn_ = targets.front().first;
         inputs_ = in;
         blocks_.flagging(flag_btn_, all);
+    }
+
+    // Live mode (gr.Interface(live=True)): rerun whenever an input changes; no Submit button.
+    Interface& live(bool on = true) {
+        if (!on) return *this;
+        for (int id : inputs_) blocks_.add_trigger(predict_, id, "change");
+        blocks_.component(submit_btn_).visible(false);
+        return *this;
     }
 
     // Example inputs shown under the input column; one value per input.
@@ -1954,6 +1972,7 @@ private:
     Blocks blocks_;
     int input_col_ = 0;
     int flag_btn_ = -1;
+    int predict_ = -1, submit_btn_ = -1;
     std::vector<int> inputs_;
 };
 
