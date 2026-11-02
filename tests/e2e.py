@@ -20,6 +20,11 @@ def sepia(page, png, out):
     page.get_by_role("button", name="Submit").click()
     page.wait_for_function(
         "[...document.querySelectorAll('.drop img')].some(i => i.src.includes('sepia.png'))", timeout=15000)
+    page.get_by_label("jpeg").check()
+    page.get_by_role("button", name="Submit").click()
+    page.wait_for_function(
+        "[...document.querySelectorAll('.drop img')].some(i => i.src.includes('sepia.jpg') && i.complete && i.naturalWidth > 0)",
+        timeout=15000)
     size = page.locator("input[type=text]").last.input_value()
     page.screenshot(path=str(out / "e2e_sepia.png"), full_page=True)
     assert " x " in size, size

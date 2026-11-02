@@ -1,8 +1,10 @@
 // gradio_image.hpp - optional pixel access for gr::Image values (stb_image / stb_image_write).
+// Reads PNG / JPEG / BMP / GIF (first frame) / TGA / PSD / HDR / PNM; writes PNG and JPEG. No WebP.
 //
 //   gr::Pixels px = gr::load_pixels(file);      // decode PNG/JPEG/BMP/GIF to RGB(A) bytes
 //   ...
 //   return gr::to_png(px);                       // FileData ready to return from a handler
+//   return gr::to_jpeg(px, 90);                  // or JPEG (quality 1..100)
 #pragma once
 
 #include "gradio.hpp"
@@ -35,6 +37,8 @@ struct Pixels {
 inline Pixels load_pixels(const FileData& f, int channels = 3) {
     if (f.empty()) throw Error("no image");
     std::string bytes = f.read();
+    if (bytes.size() >= 12 && bytes.compare(0, 4, "RIFF") == 0 && bytes.compare(8, 4, "WEBP") == 0)
+        throw Error("WebP is not supported; use PNG or JPEG");
     int w, h, n;
     unsigned char* p = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(bytes.data()), (int)bytes.size(),
                                              &w, &h, &n, channels);
@@ -46,6 +50,27 @@ inline Pixels load_pixels(const FileData& f, int channels = 3) {
     px.data.assign(p, p + (size_t)w * h * px.channels);
     stbi_image_free(p);
     return px;
+}
+
+// JPEG has no alpha: 2/4-channel images are written as gray/RGB. quality 1..100.
+inline FileData to_jpeg(const Pixels& px, int quality = 90, const std::string& name = "image.jpg") {
+    const Pixels* src = &px;
+    Pixels flat;
+    if (px.channels == 2 || px.channels == 4) {
+        int c = px.channels - 1;
+        flat = Pixels{px.width, px.height, c, std::vector<uint8_t>((size_t)px.width * px.height * c)};
+        for (size_t i = 0; i < (size_t)px.width * px.height; ++i)
+            for (int k = 0; k < c; ++k) flat.data[i * c + k] = px.data[i * px.channels + k];
+        src = &flat;
+    }
+    std::string out;
+    auto sink = [](void* ctx, void* data, int size) {
+        static_cast<std::string*>(ctx)->append(static_cast<const char*>(data), (size_t)size);
+    };
+    if (!stbi_write_jpg_to_func(sink, &out, src->width, src->height, src->channels, src->data.data(),
+                                std::clamp(quality, 1, 100)))
+        throw Error("cannot encode JPEG");
+    return FileData::from_bytes(std::move(out), "image/jpeg", name);
 }
 
 inline FileData to_png(const Pixels& px, const std::string& name = "image.png") {

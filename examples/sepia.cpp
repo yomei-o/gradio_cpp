@@ -5,7 +5,7 @@
 
 int main() {
     gr::Interface demo(
-        [](const gr::FileData& img, double strength) {
+        [](const gr::FileData& img, double strength, const std::string& format) {
             gr::Pixels px = gr::load_pixels(img, 3);
             double s = strength / 100.0;
             for (int y = 0; y < px.height; ++y)
@@ -19,10 +19,11 @@ int main() {
                     p[1] = (uint8_t)std::min(255.0, g + (sg - g) * s);
                     p[2] = (uint8_t)std::min(255.0, b + (sb - b) * s);
                 }
-            return std::make_tuple(gr::to_png(px, "sepia.png"),
+            gr::FileData out = format == "jpeg" ? gr::to_jpeg(px, 90, "sepia.jpg") : gr::to_png(px, "sepia.png");
+            return std::make_tuple(out,
                                    std::to_string(px.width) + " x " + std::to_string(px.height));
         },
-        {gr::Image("input"), gr::Slider("strength (%)", 0, 100, 100)},
+        {gr::Image("input"), gr::Slider("strength (%)", 0, 100, 100), gr::Radio("output format", {"png", "jpeg"}, "png")},
         {gr::Image("sepia"), gr::Textbox("size")},
         "Sepia");
     demo.launch();

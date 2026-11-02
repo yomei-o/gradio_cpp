@@ -43,15 +43,29 @@ def main():
         assert c.predict("ok", False, api_name="/count")[0] == "ok"
         print("blocks ok:", len(seen), "updates; final", repr(final), "; cancelled after", len(job.outputs()))
     elif which == "sepia":
-        img, size = c.predict(handle_file(png), 50, api_name="/predict")
-        assert Path(img).exists() and Path(img).stat().st_size > 1000, img
+        img, size = c.predict(handle_file(png), 50, "png", api_name="/predict")
+        assert Path(img).read_bytes()[:8] == bytes.fromhex("89504e470d0a1a0a"), img
         assert " x " in size, size
+        # JPEG out, then that JPEG back in (stb_image reads it)
+        jpg, size2 = c.predict(handle_file(png), 50, "jpeg", api_name="/predict")
+        assert Path(jpg).suffix == ".jpg" and Path(jpg).read_bytes()[:2] == bytes.fromhex("ffd8"), jpg
+        img3, size3 = c.predict(handle_file(jpg), 0, "png", api_name="/predict")
+        assert size3 == size2 == size, (size, size2, size3)
+        # WebP is refused with a clear message
+        import tempfile
+        webp = Path(tempfile.gettempdir()) / "gradio_cpp_test.webp"
+        webp.write_bytes(b"RIFF\x1a\x00\x00\x00WEBPVP8 " + b"\x00" * 14)
         try:
-            c.predict(None, 50, api_name="/predict")
+            c.predict(handle_file(str(webp)), 50, "png", api_name="/predict")
+            raise AssertionError("webp should fail")
+        except AppError as e:
+            assert "WebP is not supported" in str(e), e
+        try:
+            c.predict(None, 50, "png", api_name="/predict")
             raise AssertionError("expected an error")
         except AppError as e:  # gr::Error from the handler reaches the client
             assert "no image" in str(e), e
-        print("sepia ok:", size, "->", img)
+        print("sepia ok:", size, "-> png, jpeg, jpeg in; webp refused")
     elif which == "components":
         r = c.predict("vegetable", "leek", ["pepper"], api_name="/order")
         assert r == "vegetable: leek +pepper", r
