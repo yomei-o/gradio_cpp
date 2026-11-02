@@ -62,7 +62,7 @@ llama.cpp は b12032 で確認した。
 |---|---|
 | `gr::Interface` | 入力・出力・Clear/Submit を自動配置 |
 | `gr::Blocks` | `row()` / `column()` / `tabs()`+`tab()` / `accordion()` で自由レイアウト、`click` / `submit` / `change` イベント |
-| `gr::ChatInterface` | `fn(message, history[, yield])` だけでチャット画面。Stop ボタン、`/chat` API 付き |
+| `gr::ChatInterface` | `fn(message, history[, yield])` だけでチャット画面。Stop ボタン、`/chat` API 付き。`additional_inputs`（温度やシステムプロンプトなど）は「Additional Inputs」欄に出て、history の後ろの引数で受け取る |
 | コンポーネント | Textbox, Number, Slider, Checkbox, Image, File, Markdown, JSON, Button, ClearButton, Chatbot（messages 形式）, MultimodalTextbox, Dropdown, Radio, CheckboxGroup, Gallery, HTML, Code, Dataframe, Label, Audio, Video, State, AnnotatedImage, LinePlot, BarPlot, ScatterPlot, ImageEditor, Model3D |
 | グラフ | 本家の native plot 形式（`{columns, data, datatypes, mark}`）。ハンドラは `gr::DataFrame` を返せばよい |
 | ImageEditor | 背景画像に描き込み。値は `gr::EditorValue{background, layers, composite}`（本家と同じ形） |

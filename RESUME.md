@@ -111,6 +111,14 @@
   Git Bash は `/gradio` のような引数を Windows パスに書き換えるので、`MSYS_NO_PATHCONV=1` が要る。
 * `?__theme=dark|light`。run_all 24本 PASS（プロキシ経由の e2e と gradio_client を含む）。
 
+2026-11-02 v0.13（ChatInterface の additional_inputs）
+* ChatInterface を on_raw で作り直し：ユーザーの fn は make_handler で包み、`[message, history, extras...]` を渡す。
+  これで Request / Progress / Yield も、ChatInterface の fn でそのまま使える。`/chat` は message + extras。
+* llama_chat / llama_local に System prompt / Temperature / Max new tokens。llama_local はビルド機で、
+  2ターン目 117ms（KV 再利用は維持）。run_all 25本 PASS。
+
 ## 次にやること
 
-1. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。
+1. Linux（g++ / clang）でのビルドとテスト（Kaggle bridge かビルド機の WSL）。
+2. JS クライアント（@gradio/client）からの呼び出し確認。
+3. 大きなファイルのアップロード・ダウンロードをストリーミングに（今はメモリに全部読む）。

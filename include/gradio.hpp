@@ -908,6 +908,7 @@ struct EventOptions {
     std::string api_name;       // empty: "predict", "predict_1", ...
     int concurrency_limit = 1;  // <= 0: unlimited (Gradio's default is 1)
     bool show_api = true;
+    bool streaming = false;     // on_raw only: the handler emits intermediate results
 };
 
 // Login check: return true to let (username, password) in.
@@ -1039,6 +1040,7 @@ public:
         d.outputs = std::move(outputs);
         d.n_args = d.inputs.size();
         d.fn = std::move(fn);
+        d.streaming = opt.streaming;
         d.api_name = unique_api_name(opt.api_name.empty() ? "predict" : opt.api_name);
         d.show_api = opt.show_api;
         if (opt.concurrency_limit > 0) d.sem = std::make_shared<detail::Semaphore>(opt.concurrency_limit);
@@ -1892,12 +1894,15 @@ private:
 // ---------------------------------------------------------------------------
 class ChatInterface {
 public:
+    // additional_inputs: extra components (sliders, a system prompt...) shown in an
+    // "Additional Inputs" accordion; their values follow `history` in fn's parameters:
+    //   fn(message, history, double temperature, const std::string& system, const gr::Yield&)
     template <class F>
     ChatInterface(F fn, const std::string& title = "", const std::string& description = "",
-                  const std::string& placeholder = "Type a message...")
+                  const std::string& placeholder = "Type a message...", std::vector<Component> additional_inputs = {})
         : blocks_(title.empty() ? "Chat" : title) {
         using Args = typename detail::fn_traits<F>::args;
-        static_assert(std::tuple_size_v<Args> >= 2, "fn(message, history[, yield])");
+        static_assert(std::tuple_size_v<Args> >= 2, "fn(message, history, [additional inputs...], [yield])");
         using Msg = std::tuple_element_t<0, Args>;
         static constexpr bool multimodal = std::is_same_v<Msg, MultimodalValue>;
         static_assert(multimodal || std::is_same_v<Msg, std::string>, "message must be std::string or gr::MultimodalValue");
@@ -1908,51 +1913,80 @@ public:
         int chatbot = blocks_.add(Chatbot("Chatbot").set("show_label", false));
         int box = blocks_.add(multimodal ? MultimodalTextbox("", placeholder)
                                          : Textbox("", 1, placeholder).set("show_label", false));
-        int stop = -1, clear = -1;
+        int stop = -1;
         blocks_.row([&] {
             stop = blocks_.add(Button("Stop", "stop").set("visible", false));
-            clear = blocks_.add(ClearButton({chatbot, box}));
+            blocks_.add(ClearButton({chatbot, box}));
         });
-        (void)clear;
+        std::vector<int> extra;
+        if (!additional_inputs.empty())
+            blocks_.accordion("Additional Inputs", [&] {
+                for (auto& c : additional_inputs) extra.push_back(blocks_.add(c));
+            }, false);
 
-        auto shared = std::make_shared<F>(std::move(fn));
+        bool streaming = false;
+        size_t n_args = 0;
+        auto user = std::make_shared<Handler>(detail::make_handler(std::move(fn), streaming, n_args));
+        if (n_args != 2 + extra.size())
+            throw std::invalid_argument("chat fn takes " + std::to_string(n_args) + " input(s); expected message, history and " +
+                                        std::to_string(extra.size()) + " additional input(s)");
+        // Run the user's fn on [message, history, extras...]; on_text gets the reply so far.
+        auto run = [user](const MultimodalValue& m, const json& history, const json& args, size_t first_extra,
+                          const CallContext& ctx, const std::function<void(const std::string&)>& on_text) {
+            json a = json::array();
+            a.push_back(multimodal ? json(m) : json(m.text));
+            a.push_back(history);
+            for (size_t i = first_extra; i < args.size(); ++i) a.push_back(args[i]);
+            std::string last;
+            CallContext c2{[&](const json& out) {
+                               last = out.empty() || !out[0].is_string() ? std::string() : out[0].get<std::string>();
+                               on_text(last);
+                           },
+                           ctx.progress, ctx.request};
+            json out = (*user)(a, c2);
+            if (out.is_array() && !out.empty() && out[0].is_string()) last = out[0].get<std::string>();
+            return last;
+        };
+
         // UI event: shows the user's turn at once, clears the box, then streams the reply.
-        int ui = blocks_.on(
+        std::vector<int> ui_in = {box, chatbot};
+        ui_in.insert(ui_in.end(), extra.begin(), extra.end());
+        int ui = blocks_.on_raw(
             {{box, "submit"}},
-            [shared](const json& msg, const History& history, const Yield& y) {
-                MultimodalValue m = msg.get<MultimodalValue>();
+            [run](const json& args, const CallContext& ctx) -> json {
+                MultimodalValue m = args[0].get<MultimodalValue>();
+                History history = args[1].is_array() ? args[1].get<History>() : History{};
                 json empty = multimodal ? json{{"text", ""}, {"files", json::array()}} : json("");
-                if (m.empty()) {
-                    y(msg, history);
-                    return;
-                }
+                if (m.empty()) return json::array({args[0], history});
                 History shown = history;
                 for (auto& f : m.files) shown.push_back(ChatMessage::user_file(f));
                 if (!m.text.empty()) shown.push_back(ChatMessage::user(m.text));
-                y(empty, shown);
+                ctx.emit(json::array({empty, shown}));
                 History reply = shown;
                 reply.push_back(ChatMessage::assistant(""));
-                std::string text = call(*shared, m, history, [&](const std::string& partial) {
+                reply.back().text = run(m, json(history), args, 2, ctx, [&](const std::string& partial) {
                     reply.back().text = partial;
-                    y(empty, reply);
+                    ctx.emit(json::array({empty, reply}));
                 });
-                reply.back().text = text;
-                y(empty, reply);
+                return json::array({empty, reply});
             },
-            {box, chatbot}, {box, chatbot}, {"_chat_ui", 1, false});
+            ui_in, {box, chatbot}, {"_chat_ui", 1, false, true});
         blocks_.component(stop).set("cancels", json::array({ui}));
         blocks_.cancel(stop, {ui});
 
-        // API event (Gradio's /chat): message in, reply out, no history.
+        // API event (Gradio's /chat): message (+ additional inputs) in, reply out, no history.
         int response = blocks_.add(Textbox("response").set("visible", false));
-        blocks_.on(
+        std::vector<int> api_in = {box};
+        api_in.insert(api_in.end(), extra.begin(), extra.end());
+        blocks_.on_raw(
             {},
-            [shared](const json& msg, const Yield& y) {
-                MultimodalValue m = msg.get<MultimodalValue>();
-                std::string text = call(*shared, m, History{}, [&](const std::string& partial) { y(partial); });
-                y(text);
+            [run](const json& args, const CallContext& ctx) -> json {
+                MultimodalValue m = args[0].get<MultimodalValue>();
+                std::string text = run(m, json::array(), args, 1, ctx,
+                                       [&](const std::string& partial) { ctx.emit(json::array({partial})); });
+                return json::array({text});
             },
-            {box}, {response}, {"chat", 1, true});
+            api_in, {response}, {"chat", 1, true, true});
     }
 
     Blocks& blocks() { return blocks_; }
@@ -1960,27 +1994,6 @@ public:
     void launch(int port) { blocks_.launch(port); }
 
 private:
-    template <class F, class OnPartial>
-    static std::string call(F& fn, const MultimodalValue& m, const History& h, OnPartial on_partial) {
-        using Args = typename detail::fn_traits<F>::args;
-        using Msg = std::tuple_element_t<0, Args>;
-        auto msg = [&]() -> Msg {
-            if constexpr (std::is_same_v<Msg, MultimodalValue>) return m;
-            else return m.text;
-        };
-        if constexpr (detail::last_is_yield<Args>::value) {
-            std::string last;
-            Yield y([&](const json& out) {
-                last = out.empty() ? std::string() : out[0].get<std::string>();
-                on_partial(last);
-            });
-            fn(msg(), h, y);
-            return last;
-        } else {
-            return fn(msg(), h);
-        }
-    }
-
     Blocks blocks_;
 };
 

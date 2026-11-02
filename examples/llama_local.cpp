@@ -62,8 +62,8 @@ public:
     }
 
     // One context, so one generation at a time (the UI and the /chat API share it).
-    std::string chat(const gr::History& history, const gr::MultimodalValue& message,
-                     const std::function<void(const std::string&)>& on_text) {
+    std::string chat(const gr::History& history, const gr::MultimodalValue& message, const std::string& system_prompt,
+                     float temperature, int max_tokens, const std::function<void(const std::string&)>& on_text) {
         std::lock_guard<std::mutex> lk(m_);
 
         // 1. history -> chat messages, images become media markers + bitmaps
@@ -83,7 +83,7 @@ public:
             bitmaps.emplace_back(w.bitmap, &mtmd_bitmap_free);
             add("user", marker + "\n");
         };
-        if (!opt_.system_prompt.empty()) add("system", opt_.system_prompt);
+        if (!system_prompt.empty()) add("system", system_prompt);
         for (auto& m : history) {
             if (m.metadata.is_object() && m.metadata.contains("title")) continue;
             if (m.is_file()) {
@@ -133,7 +133,7 @@ public:
         std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> smpl(llama_sampler_chain_init(sp),
                                                                            &llama_sampler_free);
         llama_sampler_chain_add(smpl.get(), llama_sampler_init_min_p(0.05f, 1));
-        llama_sampler_chain_add(smpl.get(), llama_sampler_init_temp(opt_.temperature));
+        llama_sampler_chain_add(smpl.get(), llama_sampler_init_temp(temperature));
         llama_sampler_chain_add(smpl.get(), llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
         llama_batch batch = llama_batch_init(1, 0, 1);
         struct BatchFree {
@@ -143,7 +143,7 @@ public:
 
         std::string text;
         size_t shown = 0;
-        for (int i = 0; i < opt_.max_tokens && n_past < (llama_pos)llama_n_ctx(ctx_); ++i) {
+        for (int i = 0; i < max_tokens && n_past < (llama_pos)llama_n_ctx(ctx_); ++i) {
             llama_token tok = llama_sampler_sample(smpl.get(), ctx_, -1);
             if (llama_vocab_is_eog(vocab_, tok)) break;
             char buf[256];
@@ -314,10 +314,15 @@ int main(int argc, char** argv) {
     try {
         LocalLLM llm(o);
         gr::ChatInterface chat(
-            [&](const gr::MultimodalValue& message, const gr::History& history, const gr::Yield& yield) {
-                llm.chat(history, message, [&](const std::string& so_far) { yield(so_far); });
+            [&](const gr::MultimodalValue& message, const gr::History& history, const std::string& system,
+                double temperature, double max_tokens, const gr::Yield& yield) {
+                llm.chat(history, message, system, (float)temperature, (int)max_tokens,
+                         [&](const std::string& so_far) { yield(so_far); });
             },
-            "llama.cpp (linked in)", "Model: `" + gr::detail::u8str(gr::detail::u8path(o.model).filename()) + "`");
+            "llama.cpp (linked in)", "Model: `" + gr::detail::u8str(gr::detail::u8path(o.model).filename()) + "`",
+            "Type a message...",
+            {gr::Textbox("System prompt", 2, "", o.system_prompt), gr::Slider("Temperature", 0, 2, o.temperature, 0.05),
+             gr::Slider("Max new tokens", 16, 4096, o.max_tokens, 16)});
         chat.launch(o.launch);
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << "\n";

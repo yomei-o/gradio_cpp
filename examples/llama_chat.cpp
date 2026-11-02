@@ -26,11 +26,19 @@ int main(int argc, char** argv) {
     gr::openai::Options opt;
     opt.model = model;
 
+    // System prompt / temperature / max tokens can be changed in "Additional Inputs".
     gr::ChatInterface chat(
-        [&](const gr::MultimodalValue& message, const gr::History& history, const gr::Yield& yield) {
-            gr::json messages = gr::openai::to_messages(history, message, system_prompt);
-            llm.chat(messages, [&](const std::string& so_far) { yield(so_far); }, opt);
+        [&](const gr::MultimodalValue& message, const gr::History& history, const std::string& system,
+            double temperature, double max_tokens, const gr::Yield& yield) {
+            gr::openai::Options o = opt;
+            o.temperature = temperature;
+            o.max_tokens = (int)max_tokens;
+            gr::json messages = gr::openai::to_messages(history, message, system);
+            llm.chat(messages, [&](const std::string& so_far) { yield(so_far); }, o);
         },
-        "llama.cpp chat", "Attach an image with **+**, drag & drop, or paste, then ask about it. LLM: `" + server + "`");
+        "llama.cpp chat", "Attach an image with **+**, drag & drop, or paste, then ask about it. LLM: `" + server + "`",
+        "Type a message...",
+        {gr::Textbox("System prompt", 2, "", system_prompt), gr::Slider("Temperature", 0, 2, 0.7, 0.05),
+         gr::Slider("Max new tokens", 16, 4096, 1024, 16)});
     chat.launch(launch);
 }

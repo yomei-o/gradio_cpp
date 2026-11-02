@@ -50,6 +50,7 @@ run chat_echo -- $E2E stop
 python tests/mock_openai.py 8090 > "$OUT/mock.log" 2>&1 &
 MOCK=$!
 run llama_chat --server http://127.0.0.1:8090 -- $E2E mock "$PNG" "$OUT"
+if [ -n "${GC_PYTHON:-}" ]; then run llama_chat --server http://127.0.0.1:8090 -- $GC_PYTHON tests/client_test.py mockapi; fi
 kill $MOCK 2>/dev/null
 
 if [ -n "${LLM:-}" ]; then run llama_chat --server "$LLM" -- $E2E llm "$PNG" "$OUT"; fi

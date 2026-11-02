@@ -260,6 +260,15 @@ def main():
             first, second = chat(page, sys.argv[2], out, "images=[PNG", "second turn")
             assert "messages=1" in first and "この画像は何？" in first, first
             assert "messages=3" in second and "user/assistant/user" in second, second
+            # Additional Inputs: a system prompt reaches the LLM as a system message
+            page.locator("summary", has_text="Additional Inputs").click()
+            page.locator("details.accordion textarea").first.fill("Be brief.")
+            page.locator(".mm textarea").fill("third turn")
+            page.keyboard.press("Enter")
+            wait_bot_done(page, "third turn")
+            third = last_bot(page)
+            assert third.startswith("messages=6 roles=system/user/assistant/user/assistant/user"), third
+            print("  3:", third)
         else:
             blocks(page, Path(sys.argv[2] if len(sys.argv) > 2 else "."))
         toasts = page.locator(".toast").all_text_contents()

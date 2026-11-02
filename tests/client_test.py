@@ -136,9 +136,13 @@ def main():
         assert Path(back).read_bytes() == wav.read_bytes() and "audio/wav" in info, info
         print("extras ok: audio round trip", info, ";", end=" ")
         print("extras ok: state 1,2,3 then 1 in a new session; progress", sorted(set(progress))[:3], "; label", label["label"])
+    elif which == "mockapi":  # llama_chat + mock LLM: /chat takes message + the additional inputs
+        r = c.predict({"text": "hi", "files": []}, "Be brief.", 0.5, 64, api_name="/chat")
+        assert r.startswith("messages=2 roles=system/user"), r
+        print("mockapi ok:", r)
     elif which == "llm":  # a real model behind /chat: any non-empty answer, streamed
         q = sys.argv[3] if len(sys.argv) > 3 else "Describe this image in one sentence."
-        job = c.submit({"text": q, "files": [handle_file(png)]}, api_name="/chat")
+        job = c.submit({"text": q, "files": [handle_file(png)]}, "", 0.2, 128, api_name="/chat")
         parts = list(job)
         r = job.result()
         assert r.strip(), r
@@ -146,9 +150,9 @@ def main():
     elif which == "llm2":  # two turns through the UI event (fn_index 0), so history is sent back
         t0 = time.time()
         _, hist = c.predict({"text": "Describe this image in one sentence.", "files": [handle_file(png)]}, [],
-                            fn_index=0)
+                            "", 0.2, 128, fn_index=0)
         t1 = time.time()
-        _, hist = c.predict({"text": "What color is the background?", "files": []}, hist, fn_index=0)
+        _, hist = c.predict({"text": "What color is the background?", "files": []}, hist, "", 0.2, 128, fn_index=0)
         t2 = time.time()
         roles = [m["role"] for m in hist]
         assert roles == ["user", "user", "assistant", "user", "assistant"], roles
