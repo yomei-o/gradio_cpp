@@ -63,7 +63,10 @@ llama.cpp は b12032 で確認した。
 | `gr::Interface` | 入力・出力・Clear/Submit を自動配置 |
 | `gr::Blocks` | `row()` / `column()` / `tabs()`+`tab()` / `accordion()` で自由レイアウト、`click` / `submit` / `change` イベント |
 | `gr::ChatInterface` | `fn(message, history[, yield])` だけでチャット画面。Stop ボタン、`/chat` API 付き |
-| コンポーネント | Textbox, Number, Slider, Checkbox, Image, File, Markdown, JSON, Button, ClearButton, Chatbot（messages 形式）, MultimodalTextbox, Dropdown, Radio, CheckboxGroup, Gallery, HTML |
+| コンポーネント | Textbox, Number, Slider, Checkbox, Image, File, Markdown, JSON, Button, ClearButton, Chatbot（messages 形式）, MultimodalTextbox, Dropdown, Radio, CheckboxGroup, Gallery, HTML, Code, Dataframe, Label, Audio, Video, State |
+| `gr::State` | セッションごとの値。入力として受け取り、出力として返すと次の呼び出しへ引き継がれる（gradio_client ではサーバ側のセッションに保存） |
+| 進捗 | 最後の引数を `const gr::Progress&` にすると `progress(0.3, "step 3")` で進捗バーが出る（`Yield` にも `progress()`） |
+| Examples | `blocks.examples({{...}, ...}, {inputs})`、`Interface::examples(...)`。行をクリックすると入力欄に入る |
 | `gr::update()` | 値の代わりに返すと、そのコンポーネントの props を変える（`visible`、`choices`、`label` など） |
 | イベント | `then()`（成功後に続けて実行）、`cancel()`（実行中のイベントを止める） |
 | 型付きハンドラ | 引数の型（`std::string`, `double`, `int`, `bool`, `gr::FileData`, `gr::json`）に自動変換。複数出力は `std::tuple` で返す |
@@ -130,6 +133,7 @@ MSVC では `/utf-8 /bigobj` を付ける（CMake の `gradio_cpp` ターゲッ�
 * `examples/sepia.cpp` — 画像を入力してセピア化
 * `examples/blocks.cpp` — Blocks レイアウト、複数出力、ストリーミング
 * `examples/components.cpp` — Tabs / Accordion / Dropdown / Radio / CheckboxGroup / Gallery / `gr::update`
+* `examples/extras.cpp` — State / Progress / Examples / Code / Dataframe / Label / Audio
 * `examples/chat_echo.cpp` — LLM なしの ChatInterface（受け取ったものを返す）
 * `examples/llama_chat.cpp` — llama-server につなぐ画像付きチャット
 * `examples/llama_local.cpp` — llama.cpp（libmtmd）を直接リンクした画像付きチャット（`-DGRADIO_LLAMA_CPP=...` のときだけビルド）

@@ -83,6 +83,21 @@ footer a { color: var(--muted); cursor: pointer; }
 #api.open { display: block; }
 #api pre { background: var(--panel); border: 1px solid var(--border); padding: 10px; border-radius: 6px; overflow: auto; font-size: 13px; }
 .hidden { display: none !important; }
+textarea.code { font: 13px/1.45 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre; tab-size: 4; }
+.drop audio, .drop video { width: 100%; max-height: 420px; }
+.lbl-top { font-size: 26px; font-weight: 700; text-align: center; padding: 6px 0 10px; }
+.lbl-row { display: grid; grid-template-columns: minmax(80px, 30%) 1fr 54px; gap: 8px; align-items: center; font-size: 13px; margin: 3px 0; }
+.lbl-bar { height: 10px; border-radius: 5px; background: var(--secondary); overflow: hidden; }
+.lbl-bar > div { height: 100%; background: var(--primary); }
+.df-wrap { overflow: auto; max-height: 420px; }
+table.df { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.df th, table.df td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+table.df th { background: var(--panel); position: sticky; top: 0; }
+table.df td[contenteditable="true"]:focus { outline: 2px solid var(--primary); }
+table.ds tbody tr { cursor: pointer; }
+table.ds tbody tr:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+table.ds img { height: 48px; border-radius: 4px; display: block; }
+.prog { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--primary); width: 0; transition: width .2s; border-radius: var(--radius) var(--radius) 0 0; }
 .tabs { display: flex; flex-direction: column; gap: 12px; }
 .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .tabbar button { font: inherit; background: none; border: 1px solid transparent; border-bottom: none; padding: 6px 14px;
@@ -154,7 +169,8 @@ function markdown(src) {
     if (list) { out.push("<ul>" + list.map(i => "<li>" + inline(i) + "</li>").join("") + "</ul>"); list = null; } };
   for (const line of String(src ?? "").split("\n")) {
     if (code !== null) { if (line.startsWith("```")) { out.push("<pre><code>" + escapeHtml(code.join("\n")) + "</code></pre>"); code = null; } else code.push(line); continue; }
-    if (line.startsWith("```")) { flush(); code = []; continue; }
+    i)GRFE",
+        R"GRFE(f (line.startsWith("```")) { flush(); code = []; continue; }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
     const li = line.match(/^\s*(?:[-*]|\d+[.)])\s+(.*)$/);
@@ -188,8 +204,7 @@ function emitter(id) {
 function block(c, parent) {
   const b = el("div", "block", parent);
   if (c.props.elem_id) b.id = c.props.elem_id;
-  if (c.props.visible === false) b.classList.add("hidde)GRFE",
-        R"GRFE(n");
+  if (c.props.visible === false) b.classList.add("hidden");
   if (c.props.show_label !== false && c.props.label) el("span", "label", b).textContent = c.props.label;
   if (c.props.info) el("span", "info", b).textContent = c.props.info;
   return b;
@@ -197,18 +212,25 @@ function block(c, parent) {
 
 function withLoading(b) {
   // Counted, so overlapping runs that share an output don't cancel each other's indicator.
-  let n = 0, timer = null, t0 = 0, span = null;
-  return on => {
+  let n = 0, timer = null, t0 = 0, span = null, bar = null, desc = "";
+  const fn = on => {
     if (on) {
       if (n++ > 0) return;
-      b.classList.add("pending"); t0 = performance.now(); span = el("span", "timer", b);
-      const s = span;
-      timer = setInterval(() => s.textContent = ((performance.now() - t0) / 1000).toFixed(1) + "s", 100);
+      b.classList.add("pending"); t0 = performance.now(); desc = "";
+      span = el("span", "timer", b); bar = el("div", "prog", b);
+      const sp = span;
+      timer = setInterval(() => sp.textContent = (desc ? desc + " · " : "") + ((performance.now() - t0) / 1000).toFixed(1) + "s", 100);
     } else {
       if (n === 0 || --n > 0) return;
-      b.classList.remove("pending"); clearInterval(timer); span?.remove(); span = null;
+      b.classList.remove("pending"); clearInterval(timer); span?.remove(); bar?.remove(); span = bar = null;
     }
   };
+  fn.progress = (f, d) => {
+    if (!bar) return;
+    bar.style.width = Math.max(0, Math.min(1, f ?? 0)) * 100 + "%";
+    desc = (d ? d + " " : "") + (f != null ? Math.round(f * 100) + "%" : "");
+  };
+  return fn;
 }
 
 async function upload(file) {
@@ -271,8 +293,10 @@ const RENDER = {
     set(p.value);
     return { get: () => box.checked, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
   },
-  image(c, parent) { return fileLike(c, parent, true); },
-  file(c, parent) { return fileLike(c, parent, false); },
+  image(c, parent) { return fileLike(c, parent, "image"); },
+  file(c, parent) { return fileLike(c, parent, "file"); },
+  audio(c, parent) { return fileLike(c, parent, "audio"); },
+  video(c, parent) { return fileLike(c, parent, "video"); },
   markdown(c, parent) {
     const p = c.props, b = el("div", "block plain", parent), d = el("div", "md", b);
     if (p.elem_classes) d.classList.add(...[].concat(p.elem_classes));
@@ -371,7 +395,8 @@ const RENDER = {
     const fill = () => {
       sel.innerHTML = "";
       if (!p.multiselect) { const o = el("option", "", sel); o.value = ""; o.textContent = ""; o.dataset.none = "1"; }
-      for (const [label, value] of p.choices || []) { const o = el("option", "", sel); o.value = JSON.stringify(value); o.textContent = label; }
+      for (const [label, value] of p.choices || []) { const)GRFE",
+        R"GRFE( o = el("option", "", sel); o.value = JSON.stringify(value); o.textContent = label; }
     };
     const get = () => p.multiselect ? [...sel.selectedOptions].map(o => JSON.parse(o.value))
       : (sel.value === "" ? null : JSON.parse(sel.value));
@@ -399,13 +424,87 @@ const RENDER = {
       for (const item of val) {
         const f = (item && item.image) || item; if (!f) continue;
         const fig = el("figure", "", g), img = el("img", "", fig); img.src = f.url; img.alt = item.caption || f.orig_name || "";
-        img.onclick = () => { const lb = el("div", "", document.body); )GRFE",
-        R"GRFE(lb.id = "lightbox"; el("img", "", lb).src = f.url; lb.onclick = () => lb.remove(); };
+        img.onclick = () => { const lb = el("div", "", document.body); lb.id = "lightbox"; el("img", "", lb).src = f.url; lb.onclick = () => lb.remove(); };
         if (item.caption) el("figcaption", "", fig).textContent = item.caption;
       }
     };
     set(p.value);
     return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
+  },
+  state(c) {
+    let val = c.props.value;
+    return { get: () => val, set: v => val = v, reset: () => val = c.props.value, on: emitter(c.id).on, loading: () => {} };
+  },
+  code(c, parent) {
+    const p = c.props, b = block(c, parent), ev = emitter(c.id), ta = el("textarea", "code", b);
+    ta.rows = p.lines || 10; ta.readOnly = !p.interactive; ta.spellcheck = false;
+    ta.addEventListener("keydown", e => { if (e.key === "Tab" && !ta.readOnly) { e.preventDefault(); ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end"); } });
+    ta.addEventListener("input", () => { ev.fire("input"); ev.fire("change"); });
+    const set = v => ta.value = v ?? "";
+    set(p.value);
+    return { get: () => ta.value, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
+  },
+  label(c, parent) {
+    const p = c.props, b = block(c, parent), box = el("div", "", b);
+    let val = null;
+    const set = v => {
+      val = v; box.innerHTML = "";
+      if (v == null) return;
+      if (typeof v !== "object") { el("div", "lbl-top", box).textContent = String(v); return; }
+      el("div", "lbl-top", box).textContent = v.label ?? "";
+      for (const cf of (v.confidences || []).slice(0, p.num_top_classes || 5)) {
+        const r = el("div", "lbl-row", box);
+        el("span", "", r).textContent = cf.label;
+        const bar = el("div", "lbl-bar", r), fill = el("div", "", bar); fill.style.width = (cf.confidence * 100).toFixed(1) + "%";
+        el("span", "", r).textContent = (cf.confidence * 100).toFixed(1) + "%";
+      }
+    };
+    set(p.value);
+    return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
+  },
+  dataframe(c, parent) {
+    const p = c.props, b = block(c, parent), ev = emitter(c.id), wrap = el("div", "df-wrap", b);
+    let val = { headers: [], data: [] };
+    const set = v => {
+      val = v && typeof v === "object" ? { headers: v.headers || [], data: (v.data || []).map(r => [...r]) } : { headers: p.headers || [], data: [] };
+      wrap.innerHTML = "";
+      const t = el("table", "df", wrap), hr = el("tr", "", el("thead", "", t));
+      val.headers.forEach(h => el("th", "", hr).textContent = h);
+      const tb = el("tbody", "", t);
+      val.data.forEach((row, i) => {
+        const tr = el("tr", "", tb);
+        row.forEach((cell, j) => {
+          const td = el("td", "", tr); td.textContent = cell ?? "";
+          if (p.interactive) {
+            td.contentEditable = "true";
+            td.addEventListener("input", () => {
+              const raw = td.textContent;
+              val.data[i][j] = typeof cell === "number" && raw.trim() !== "" && !isNaN(Number(raw)) ? Number(raw) : raw;
+              ev.fire("input"); ev.fire("change");
+            });
+          }
+        });
+      });
+    };
+    set(p.value);
+    return { get: () => ({ headers: val.headers, data: val.data, metadata: null }), set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
+  },
+  dataset(c, parent) {
+    const p = c.props, b = block(c, parent), wrap = el("div", "df-wrap", b), ev = emitter(c.id);
+    const t = el("table", "df ds", wrap), hr = el("tr", "", el("thead", "", t)), tb = el("tbody", "", t);
+    (p.headers || []).forEach(h => el("th", "", hr).textContent = h);
+    (p.samples || []).forEach(sample => {
+      const tr = el("tr", "", tb);
+      sample.forEach((v, j) => {
+        const td = el("td", "", tr), type = (p.component_types || [])[j];
+        if (v && typeof v === "object" && v.url && type === "image") { const im = el("img", "", td); im.src = v.url; }
+        else if (v && typeof v === "object" && v.path) td.textContent = v.orig_name || v.path.split("/").pop();
+        else if (Array.isArray(v)) td.textContent = v.join(", ");
+        else td.textContent = v ?? "";
+      });
+      tr.onclick = () => { (p.components || []).forEach((id, j) => comps[id]?.set(sample[j])); ev.fire("click"); ev.fire("select"); };
+    });
+    return { get: () => null, set: () => {}, reset: () => {}, on: ev.on, loading: () => {} };
   },
   button(c, parent) {
     const p = c.props, btn = el("button", "btn " + (p.variant || "secondary"), parent), ev = emitter(c.id);
@@ -436,17 +535,19 @@ function choiceGroup(c, parent, multi) {
   return { get, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
 }
 
-function fileLike(c, parent, isImage) {
+function fileLike(c, parent, kind) {
+  const isImage = kind === "image";
   const p = c.props, b = block(c, parent), ev = emitter(c.id);
   const drop = el("div", "drop" + (p.interactive ? "" : " static"), b);
   let value = null, pending = null;
   const picker = el("input", "", b); picker.type = "file"; picker.hidden = true;
-  if (isImage) picker.accept = "image/*";
+  if (kind !== "file") picker.accept = kind + "/*";
   const show = (v, localUrl) => {
     drop.innerHTML = "";
-    if (!v) { drop.textContent = p.interactive ? (isImage ? "Drop Image Here\n- or -\nClick to Upload" : "Drop File Here\n- or -\nClick to Upload") : "";
+    if (!v) { drop.textContent = p.interactive ? `Drop ${kind[0].toUpperCase() + kind.slice(1)} Here\n- or -\nClick to Upload` : "";
       drop.style.whiteSpace = "pre-line"; return; }
     if (isImage) { const img = el("img", "", drop); img.src = localUrl || v.url; img.alt = v.orig_name || ""; }
+    else if (kind === "audio" || kind === "video") { const m = el(kind, "", drop); m.controls = true; m.src = localUrl || v.url; m.onclick = e => e.stopPropagation(); }
     else { const a = el("a", "filelink", drop); a.href = localUrl || v.url; a.download = v.orig_name || "";
       a.textContent = (v.orig_name || "file") + (v.size != null ? `  (${(v.size / 1024).toFixed(1)} KB)` : ""); a.onclick = e => e.stopPropagation(); }
     if (p.interactive) { const x = el("button", "x", drop); x.textContent = "×"; x.title = "Clear";
@@ -515,7 +616,8 @@ function build(node, parent, byId) {
   }
 }
 
-// Apply a gr.update dict: visible/value in place, anything else re-renders the component.
+// Apply a gr.update dict: visible/value in place, anything else re-rende)GRFE",
+        R"GRFE(rs the component.
 function applyUpdate(id, u) {
   const c = CBY[id]; if (!c) return;
   const { __type__, ...props } = u;
@@ -600,6 +702,9 @@ async function run(dep) {
       if (ev === "generating" || ev === "complete") {
         const vals = JSON.parse(d);
         dep.outputs.forEach((id, i) => { if (i < vals.length) setOutput(id, vals[i]); });
+      } else if (ev === "progress") {
+        const pr = JSON.parse(d);
+        outs.forEach(c => c.loading.progress?.(pr.progress, pr.desc));
       } else if (ev === "error") error = JSON.parse(d) ?? "error";
     });
     if (error) throw new Error(error);

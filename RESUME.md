@@ -66,6 +66,15 @@
 * client_test.py の llm2（UI のイベント fn_index=0 に history を渡して2ターン）：2ターン目は
   reused 41 / 71、評価 107ms（1ターン目は 5580ms）。
 
+2026-11-02 v0.7（部品その2）
+* State / Progress / Examples(dataset) / Code / Dataframe / Label / Audio / Video。
+* ハンドラは `Handler(args, CallContext{emit, progress})`。最後の引数が Yield なら generator、Progress なら進捗だけ。
+  進捗は、/call では `event: progress`、queue では `msg: progress`（`progress_data` の配列）で送る。
+* State：config で `skip_api: true`、info からも外す。ブラウザでは値をフロントが持って往復させる。
+  gradio_client（queue）では、client が None を入れてくるので、Session::state から差し替え、終わったら書き戻す
+  （同じセッションの並行イベントで競合しないよう、コピーで渡して後でマージする）。
+* run_all：e2e 9本＋gradio_client 6本、計15本（LLM 本物を除く14本）PASS。
+
 ## 次にやること
 
 1. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

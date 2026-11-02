@@ -62,6 +62,33 @@ def main():
         r = c.predict({"text": "hello", "files": [handle_file(png)]}, api_name="/chat")
         assert "Got image" in r and "You said: hello" in r, r
         print("chat ok:", r.replace("\n", " ")[:80])
+    elif which == "extras":
+        # gr::State lives in the session: three calls count 1, 2, 3; a new client starts again
+        assert [c.predict(api_name="/add_one") for _ in range(3)] == ["1", "2", "3"]
+        c2 = Client(URL, verbose=False)
+        assert c2.predict(api_name="/add_one") == "1"
+        c2.close()
+        job = c.submit(5, api_name="/slow")
+        progress = []
+        while not job.done():
+            st = job.status()
+            if st.progress_data:
+                progress.append(st.progress_data[0].desc)
+            time.sleep(0.05)
+        assert job.result() == "done 5 steps", job.result()
+        assert any(p and p.startswith("step") for p in progress), progress
+        df, label = c.predict("def f():\n    import os\n", api_name="/analyze")
+        assert label["label"] == "Python", label
+        assert c.predict(df, api_name="/sum_counts") > 0
+        import math, struct, tempfile, wave
+        wav = Path(tempfile.gettempdir()) / "gradio_cpp_test.wav"
+        with wave.open(str(wav), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000)
+            w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(i / 8))) for i in range(8000)))
+        back, info = c.predict(handle_file(str(wav)), api_name="/echo_audio")
+        assert Path(back).read_bytes() == wav.read_bytes() and "audio/wav" in info, info
+        print("extras ok: audio round trip", info, ";", end=" ")
+        print("extras ok: state 1,2,3 then 1 in a new session; progress", sorted(set(progress))[:3], "; label", label["label"])
     elif which == "llm":  # a real model behind /chat: any non-empty answer, streamed
         q = sys.argv[3] if len(sys.argv) > 3 else "Describe this image in one sentence."
         job = c.submit({"text": q, "files": [handle_file(png)]}, api_name="/chat")

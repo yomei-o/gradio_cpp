@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <condition_variable>
 #include <deque>
@@ -386,6 +387,8 @@ inline bool is_file_type(const std::string& t) {
     return t == "image" || t == "file" || t == "audio" || t == "video";
 }
 
+inline bool skip_api_type(const std::string& t) { return t == "state"; }
+
 inline bool is_layout_type(const std::string& t) {
     return t == "row" || t == "column" || t == "tabs" || t == "tabitem" || t == "accordion";
 }
@@ -471,6 +474,70 @@ inline Component CheckboxGroup(const std::string& label, const std::vector<std::
     return Component("checkboxgroup", {{"label", label}, {"choices", choice_pairs(choices)}, {"value", value}});
 }
 
+// Per-session value kept between events (gr.State). Not shown, not part of the API.
+inline Component State(json value = nullptr) { return Component("state", {{"value", std::move(value)}}); }
+
+inline Component Code(const std::string& label = "", const std::string& language = "cpp", const std::string& value = "",
+                      int lines = 10) {
+    return Component("code", {{"label", label}, {"language", language}, {"value", value}, {"lines", lines}});
+}
+
+inline Component Audio(const std::string& label = "") {
+    return Component("audio", {{"label", label}, {"value", nullptr}, {"type", "filepath"}});
+}
+
+inline Component Video(const std::string& label = "") {
+    return Component("video", {{"label", label}, {"value", nullptr}});
+}
+
+// Classification result: top label plus a bar per class.
+inline Component Label(const std::string& label = "", int num_top_classes = 5) {
+    return Component("label", {{"label", label}, {"value", nullptr}, {"num_top_classes", num_top_classes}});
+}
+
+inline Component Dataframe(const std::string& label = "", const std::vector<std::string>& headers = {}) {
+    return Component("dataframe", {{"label", label},
+                                   {"headers", headers},
+                                   {"value", {{"headers", headers}, {"data", json::array()}, {"metadata", nullptr}}}});
+}
+
+// Value of a Label output: {"label": top, "confidences": [{"label", "confidence"}, ...]}.
+struct LabelValue {
+    std::vector<std::pair<std::string, double>> confidences;  // any order; sorted when sent
+    std::string label;                                          // empty: the most confident class
+};
+inline void to_json(json& j, const LabelValue& v) {
+    auto c = v.confidences;
+    std::stable_sort(c.begin(), c.end(), [](auto& a, auto& b) { return a.second > b.second; });
+    json arr = json::array();
+    for (auto& [k, x] : c) arr.push_back({{"label", k}, {"confidence", x}});
+    j = {{"label", !v.label.empty() ? v.label : c.empty() ? std::string() : c[0].first}, {"confidences", arr}};
+}
+inline void from_json(const json& j, LabelValue& v) {
+    v = LabelValue{};
+    if (!j.is_object()) return;
+    if (j.contains("label") && j["label"].is_string()) v.label = j["label"].get<std::string>();
+    if (j.contains("confidences") && j["confidences"].is_array())
+        for (auto& c : j["confidences"]) v.confidences.push_back({c.value("label", ""), c.value("confidence", 0.0)});
+}
+
+// Value of a Dataframe: column headers and rows of cells (numbers or strings).
+struct DataFrame {
+    std::vector<std::string> headers;
+    std::vector<std::vector<json>> data;
+};
+inline void to_json(json& j, const DataFrame& d) {
+    j = {{"headers", d.headers}, {"data", d.data}, {"metadata", nullptr}};
+}
+inline void from_json(const json& j, DataFrame& d) {
+    d = DataFrame{};
+    if (!j.is_object()) return;
+    if (j.contains("headers") && j["headers"].is_array())
+        for (auto& h : j["headers"]) d.headers.push_back(h.is_string() ? h.get<std::string>() : h.dump());
+    if (j.contains("data") && j["data"].is_array())
+        for (auto& r : j["data"]) d.data.push_back(r.is_array() ? r.get<std::vector<json>>() : std::vector<json>{});
+}
+
 inline Component HTML(const std::string& html = "") {
     return Component("html", {{"value", html}, {"show_label", false}});
 }
@@ -528,22 +595,44 @@ inline Component ClearButton(std::vector<int> components = {}, const std::string
 // Typed handler plumbing
 // ---------------------------------------------------------------------------
 using Emit = std::function<void(const json& outputs)>;
-using Handler = std::function<json(const json& args, const Emit& emit)>;
+using ProgressFn = std::function<void(double fraction, const std::string& desc)>;
+struct CallContext {
+    Emit emit;
+    ProgressFn progress;
+};
+using Handler = std::function<json(const json& args, const CallContext& ctx)>;
+
+// Take `const gr::Progress&` as the last parameter to report progress (like gr.Progress):
+//   [](int n, const gr::Progress& progress) { for (...) progress(i / (double)n, "working"); return r; }
+class Progress {
+public:
+    explicit Progress(ProgressFn p = {}) : p_(std::move(p)) {}
+    void operator()(double fraction, const std::string& desc = "") const {
+        if (p_) p_(fraction, desc);
+    }
+
+private:
+    ProgressFn p_;
+};
 
 // Take `const gr::Yield&` as the last parameter to stream intermediate results:
 //   [](int n, const gr::Yield& y) { for (...) y(partial); }
 class Yield {
 public:
-    explicit Yield(Emit e) : e_(std::move(e)) {}
+    explicit Yield(Emit e, ProgressFn p = {}) : e_(std::move(e)), p_(std::move(p)) {}
     template <class... T>
     void operator()(T&&... v) const {
         json a = json::array();
         (a.push_back(json(std::forward<T>(v))), ...);
         e_(a);
     }
+    void progress(double fraction, const std::string& desc = "") const {
+        if (p_) p_(fraction, desc);
+    }
 
 private:
     Emit e_;
+    ProgressFn p_;
 };
 
 namespace detail {
@@ -567,10 +656,16 @@ struct is_tuple : std::false_type {};
 template <class... T>
 struct is_tuple<std::tuple<T...>> : std::true_type {};
 
+// 0: plain, 1: last parameter is Yield (generator), 2: last parameter is Progress
 template <class Args, size_t N = std::tuple_size_v<Args>>
-struct last_is_yield : std::bool_constant<std::is_same_v<std::tuple_element_t<N - 1, Args>, Yield>> {};
+struct last_kind
+    : std::integral_constant<int, std::is_same_v<std::tuple_element_t<N - 1, Args>, Yield>      ? 1
+                                  : std::is_same_v<std::tuple_element_t<N - 1, Args>, Progress> ? 2
+                                                                                                 : 0> {};
 template <class Args>
-struct last_is_yield<Args, 0> : std::false_type {};
+struct last_kind<Args, 0> : std::integral_constant<int, 0> {};
+template <class Args>
+struct last_is_yield : std::bool_constant<last_kind<Args>::value == 1> {};
 
 template <class R>
 json result_to_json(R&& r) {
@@ -583,13 +678,21 @@ json result_to_json(R&& r) {
     return a;
 }
 
-template <class F, class Args, bool Stream, size_t... I>
-json invoke_typed(F& fn, const json& args, const Emit& emit, std::index_sequence<I...>) {
+template <class F, class Args, int Kind, size_t... I>
+json invoke_typed(F& fn, const json& args, const CallContext& ctx, std::index_sequence<I...>) {
     using R = typename fn_traits<F>::ret;
-    if constexpr (Stream) {
-        Yield y(emit);
+    if constexpr (Kind == 1) {
+        Yield y(ctx.emit, ctx.progress);
         fn(args[I].template get<std::tuple_element_t<I, Args>>()..., y);
         return nullptr;
+    } else if constexpr (Kind == 2) {
+        Progress pr(ctx.progress);
+        if constexpr (std::is_void_v<R>) {
+            fn(args[I].template get<std::tuple_element_t<I, Args>>()..., pr);
+            return json::array();
+        } else {
+            return result_to_json(fn(args[I].template get<std::tuple_element_t<I, Args>>()..., pr));
+        }
     } else if constexpr (std::is_void_v<R>) {
         fn(args[I].template get<std::tuple_element_t<I, Args>>()...);
         return json::array();
@@ -602,15 +705,15 @@ template <class F>
 Handler make_handler(F fn, bool& streaming, size_t& n_args) {
     using Args = typename fn_traits<F>::args;
     static constexpr size_t N = std::tuple_size_v<Args>;
-    static constexpr bool stream = last_is_yield<Args>::value;
-    static constexpr size_t NA = stream ? N - 1 : N;
-    streaming = stream;
+    static constexpr int kind = last_kind<Args>::value;
+    static constexpr size_t NA = kind ? N - 1 : N;
+    streaming = kind == 1;
     n_args = NA;
-    return [fn](const json& args, const Emit& emit) mutable -> json {
+    return [fn](const json& args, const CallContext& ctx) mutable -> json {
         if (!args.is_array() || args.size() < NA)
             throw Error("expected " + std::to_string(NA) + " input value(s), got " +
                         std::to_string(args.is_array() ? args.size() : 0));
-        return invoke_typed<F, Args, stream>(fn, args, emit, std::make_index_sequence<NA>{});
+        return invoke_typed<F, Args, kind>(fn, args, ctx, std::make_index_sequence<NA>{});
     };
 }
 
@@ -665,6 +768,33 @@ public:
     Blocks& operator=(const Blocks&) = delete;
 
     // Add a component to the current container; returns its id.
+    // Add a component inside a given container (a row/column id).
+    int add_to(int parent, Component c) {
+        stack_.push_back(parent);
+        int id = add(std::move(c));
+        stack_.pop_back();
+        return id;
+    }
+
+    // Clickable examples that fill `inputs` (gr.Examples). Each sample has one value per input.
+    int examples(const std::vector<std::vector<json>>& samples, const std::vector<int>& inputs,
+                 const std::string& label = "Examples") {
+        json headers = json::array(), types = json::array();
+        for (int id : inputs) {
+            const Component* c = find_comp(id);
+            headers.push_back(c ? c->props.value("label", std::string()) : std::string());
+            types.push_back(c ? c->type : std::string());
+        }
+        json rows = json::array();
+        for (auto& sm : samples) {
+            if (sm.size() != inputs.size())
+                throw std::invalid_argument("each example needs " + std::to_string(inputs.size()) + " value(s)");
+            rows.push_back(sm);
+        }
+        return add(Component("dataset", {{"label", label}, {"components", inputs}, {"component_types", types},
+                                         {"headers", headers}, {"samples", rows}}));
+    }
+
     int add(Component c) {
         c.id = next_id_++;
         int id = c.id;
@@ -739,6 +869,8 @@ public:
     }
 
     void set_mode(const std::string& m) { mode_ = m; }
+    void stack_push(int container) { stack_.push_back(container); }
+    void stack_pop() { stack_.pop_back(); }
 
     json config() const {
         std::set<int> as_input, as_output;
@@ -754,6 +886,10 @@ public:
                 props["interactive"] = !(as_output.count(c.id) && !as_input.count(c.id));
             if (!props.contains("visible")) props["visible"] = true;
             props["name"] = c.type;
+            if (skip_api_type(c.type)) {
+                comps.push_back({{"id", c.id}, {"type", c.type}, {"props", props}, {"skip_api", true}});
+                continue;
+            }
             comps.push_back({{"id", c.id}, {"type", c.type}, {"props", props}});
         }
         json deps = json::array();
@@ -791,6 +927,7 @@ public:
             json params = json::array(), rets = json::array();
             std::set<std::string> used;
             for (size_t k = 0; k < d.inputs.size(); ++k) {
+                if (const Component* c = find_comp(d.inputs[k]); c && skip_api_type(c->type)) continue;
                 json pi = param_info(d.inputs[k], true);
                 std::string name = parameter_name(pi["label"].is_string() ? pi["label"].get<std::string>() : "", k);
                 while (used.count(name)) name += "_";
@@ -798,7 +935,8 @@ public:
                 pi["parameter_name"] = name;
                 params.push_back(pi);
             }
-            for (int id : d.outputs) rets.push_back(param_info(id, false));
+            for (int id : d.outputs)
+                if (const Component* c = find_comp(id); !c || !skip_api_type(c->type)) rets.push_back(param_info(id, false));
             named["/" + d.api_name] = {{"parameters", params}, {"returns", rets}};
         }
         return {{"named_endpoints", named}, {"unnamed_endpoints", json::object()}};
@@ -1068,7 +1206,15 @@ private:
 
     // Run a handler: input checks, concurrency limit, streaming. Returns the final
     // outputs. emit may throw detail::Cancelled to abort.
-    json execute(const Dep& d, const json& data, const Emit& emit) {
+    json execute(const Dep& d, json data, const Emit& emit, const ProgressFn& progress = {},
+                 std::map<int, json>* state = nullptr) {
+        for (size_t i = 0; i < d.inputs.size(); ++i) {
+            const Component* c = find_comp(d.inputs[i]);
+            if (!c || c->type != "state") continue;
+            while (data.size() <= i) data.push_back(nullptr);
+            if (state && state->count(c->id)) data[i] = (*state)[c->id];
+            else if (data[i].is_null()) data[i] = c->props.value("value", json());
+        }
         check_input_files(d, data);
         struct Guard {
             detail::Semaphore* s;
@@ -1081,11 +1227,17 @@ private:
             guard.s = d.sem.get();
         }
         json last = json::array();
-        json out = d.fn(data, [&](const json& o) {
-            last = o;
-            emit(o);
-        });
-        return out.is_null() ? last : out;
+        CallContext ctx{[&](const json& o) {
+                            last = o;
+                            emit(o);
+                        },
+                        progress};
+        json out = d.fn(data, ctx);
+        if (out.is_null()) out = last;
+        if (state)
+            for (size_t i = 0; i < d.outputs.size() && i < out.size(); ++i)
+                if (const Component* c = find_comp(d.outputs[i]); c && c->type == "state") (*state)[c->id] = out[i];
+        return out;
     }
 
     static std::string dump(const json& j) { return j.dump(-1, ' ', false, json::error_handler_t::replace); }
@@ -1097,7 +1249,10 @@ private:
             if (!sink.write(msg.data(), msg.size())) throw detail::Cancelled{};
         };
         try {
-            json out = execute(deps_[ev.dep], ev.data, [&](const json& o) { send("generating", o); });
+            json out = execute(deps_[ev.dep], ev.data, [&](const json& o) { send("generating", o); },
+                               [&](double f, const std::string& desc) {
+                                   send("progress", {{"progress", f}, {"desc", desc}});
+                               });
             send("complete", out);
         } catch (const detail::Cancelled&) {
         } catch (const std::exception& e) {
@@ -1122,6 +1277,7 @@ private:
         int pending = 0;
         std::map<std::string, std::shared_ptr<std::atomic<bool>>> running;  // event_id -> cancel flag
         std::chrono::steady_clock::time_point touched = std::chrono::steady_clock::now();
+        std::map<int, json> state;  // gr::State values of this session (gradio_client path)
     };
 
     std::shared_ptr<Session> session(const std::string& hash, bool create) {
@@ -1170,6 +1326,11 @@ private:
         push(*s, {{"msg", "process_starts"}, {"event_id", event_id}, {"eta", nullptr}});
         json sent;
         json done;
+        std::map<int, json> st;  // a copy, so concurrent events of one session don't race on it
+        {
+            std::lock_guard<std::mutex> lk(s->m);
+            st = s->state;
+        }
         try {
             json out = execute(d, data, [&](const json& o) {
                 if (*cancelled) throw detail::Cancelled{};
@@ -1181,7 +1342,16 @@ private:
                 sent = o;
                 push(*s, {{"msg", "process_generating"}, {"event_id", event_id}, {"success", true},
                           {"output", {{"data", payload}, {"is_generating", true}}}});
-            });
+            }, [&](double f, const std::string& desc) {
+                if (*cancelled) throw detail::Cancelled{};
+                push(*s, {{"msg", "progress"}, {"event_id", event_id},
+                          {"progress_data", json::array({{{"index", nullptr}, {"length", nullptr}, {"unit", "steps"},
+                                                          {"progress", f}, {"desc", desc}}})}});
+            }, &st);
+            {
+                std::lock_guard<std::mutex> lk(s->m);
+                for (auto& [k, v] : st) s->state[k] = v;
+            }
             done = {{"msg", "process_completed"}, {"event_id", event_id}, {"success", true},
                     {"output", {{"data", out}, {"is_generating", false}}}};
         } catch (const detail::Cancelled&) {
@@ -1323,7 +1493,7 @@ public:
         std::vector<std::pair<int, std::string>> targets;
         int clear = -1;
         blocks_.row([&] {
-            blocks_.column([&] {
+            input_col_ = blocks_.column([&] {
                 for (size_t i = 0; i < inputs.size(); ++i) {
                     auto& c = inputs[i];
                     if (c.props.value("label", std::string()).empty())
@@ -1351,6 +1521,15 @@ public:
         all.insert(all.end(), out.begin(), out.end());
         blocks_.component(clear).set("components", all);
         blocks_.on(targets, std::move(fn), in, out, {"predict"});
+        inputs_ = in;
+    }
+
+    // Example inputs shown under the input column; one value per input.
+    Interface& examples(const std::vector<std::vector<json>>& samples) {
+        blocks_.stack_push(input_col_);
+        blocks_.examples(samples, inputs_);
+        blocks_.stack_pop();
+        return *this;
     }
 
     Blocks& blocks() { return blocks_; }
@@ -1359,6 +1538,8 @@ public:
 
 private:
     Blocks blocks_;
+    int input_col_ = 0;
+    std::vector<int> inputs_;
 };
 
 // ---------------------------------------------------------------------------

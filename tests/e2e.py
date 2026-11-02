@@ -139,6 +139,33 @@ def main():
             page.get_by_text("raw HTML").wait_for(state="visible")
             page.screenshot(path=str(out / "e2e_components.png"), full_page=True)
             print("components ok:", summary)
+        elif which == "hello":  # Interface + Examples: clicking an example fills the inputs
+            page.locator("table.ds tbody tr").nth(1).click()
+            assert page.locator("input[type=text]").first.input_value() == "C++"
+            page.get_by_role("button", name="Submit").click()
+            page.wait_for_function("[...document.querySelectorAll('input[type=text]')].some(i => i.value === 'Hello, C++!!!!!!!')")
+            print("hello ok: example row filled the inputs")
+        elif which == "extras":
+            out = Path(sys.argv[2] if len(sys.argv) > 2 else ".")
+            add = page.get_by_role("button", name="Add one")
+            for _ in range(3):
+                add.click()
+                page.wait_for_timeout(300)
+            page.wait_for_function("[...document.querySelectorAll('input[type=text]')].some(i => i.value === '3')")
+            page.get_by_role("button", name="Progress").click()
+            page.get_by_role("button", name="Run slow job").click()
+            page.wait_for_selector(".prog")
+            page.wait_for_function("(document.querySelector('.timer')?.textContent || '').includes('step')")
+            prog_text = page.locator(".timer").first.text_content()
+            page.wait_for_function("[...document.querySelectorAll('input[type=text]')].some(i => i.value.startsWith('done 8'))")
+            page.get_by_role("button", name="Text tools").click()
+            page.locator("table.ds tbody tr").first.click()  # Python example
+            page.get_by_role("button", name="Analyze", exact=True).click()
+            page.wait_for_function("document.querySelector('.lbl-top')?.textContent === 'Python'")
+            page.get_by_role("button", name="Sum the counts").click()
+            page.wait_for_function("[...document.querySelectorAll('input[type=number]')].some(i => Number(i.value) > 10)")
+            page.screenshot(path=str(out / "e2e_extras.png"), full_page=True)
+            print("extras ok: state=3, progress shown as", repr(prog_text), ", label=Python")
         elif which == "mock":
             out = Path(sys.argv[3] if len(sys.argv) > 3 else ".")
             first, second = chat(page, sys.argv[2], out, "images=[PNG", "second turn")

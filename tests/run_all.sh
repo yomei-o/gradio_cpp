@@ -25,6 +25,8 @@ E2E="python tests/e2e.py"
 run sepia -- $E2E sepia "$PNG" "$OUT"
 run blocks -- $E2E blocks "$OUT"
 run components -- $E2E components "$OUT"
+run hello -- $E2E hello
+run extras -- $E2E extras "$OUT"
 run chat_echo -- $E2E echo "$PNG" "$OUT"
 run chat_echo -- $E2E stop
 
@@ -41,6 +43,7 @@ if [ -n "${GC_PYTHON:-}" ]; then
   run blocks -- $GC blocks
   run sepia -- $GC sepia "$PNG"
   run components -- $GC components
+  run extras -- $GC extras
   run chat_echo -- $GC chat "$PNG"
 fi
 exit $fail

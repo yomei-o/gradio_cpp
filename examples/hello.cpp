@@ -9,5 +9,6 @@ int main() {
         {gr::Textbox("name"), gr::Slider("intensity", 1, 10, 3)},
         {gr::Textbox("greeting")},
         "Hello");
+    demo.examples({{"World", 3}, {"C++", 7}});
     demo.launch();
 }
