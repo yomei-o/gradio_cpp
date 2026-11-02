@@ -20,17 +20,23 @@
   `/gradio_api/file=` は実装済み。`gradio_client` が使う `/gradio_api/queue/join` と
   `/gradio_api/queue/data`（sse_v3）は未実装。
 
-## 確認済み（2026-11-02）
+## 確認済み
 
+2026-11-02 v0.1
 * curl：count（複数出力・JSON）、stream（generating×N → complete）、引数不足 → error、
   許可外ファイル → 403 または error。
 * Playwright（`tests/e2e.py`）：sepia（アップロード → Submit → 出力画像）、blocks（stream と count）。どちらも通過。
 
+2026-11-02 v0.2（Chat）
+* Chatbot / MultimodalTextbox / ChatInterface / then / cancel、`gradio_openai.hpp`（OpenAI 互換クライアント）。
+* e2e：echo（画像＋2ターン目の履歴）、stop（途中で止まり、その後も会話できる）、mock（`tests/mock_openai.py`。
+  画像が PNG 1280x800 として届き、2ターン目の roles は user/assistant/user）、すべて通過。
+* 本物：llama.cpp b12032 の win-cpu-arm64 版 llama-server と SmolVLM2-500M-Video-Instruct-Q8_0（＋mmproj）で、
+  画像を説明する返事が返った。バイナリとモデルは `C:\prog\llama_cpp`（リポの外）に置いてある。
+
 ## 次にやること
 
-1. **Chatbot コンポーネント**（メッセージ形式 `[{role, content}]`、画像付きメッセージ、ストリーミング）。
-2. **MultimodalTextbox**（テキスト＋画像の添付）。
-3. **llama.cpp サンプル**：まずは `llama-server`（OpenAI 互換 `/v1/chat/completions`、`stream: true`、
-   画像は `image_url` に data URI）へ httplib::Client で投げる形。その後、libmtmd を直接リンクする版も検討。
-4. `gr.update` 相当（visible や value の部分更新）、Tabs / Accordion、Dropdown / Radio。
-5. `gradio_client` 互換（queue/join + sse_v3）。
+1. `gr::update`（visible や value の部分更新）、Dropdown / Radio、Tabs / Accordion、Gallery。
+2. `gradio_client` 互換（`/gradio_api/queue/join` と `/gradio_api/queue/data` の sse_v3、`/gradio_api/info`
+   の細部）。Python の gradio_client から本当に呼んで確かめる。
+3. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

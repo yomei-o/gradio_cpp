@@ -83,6 +83,29 @@ footer a { color: var(--muted); cursor: pointer; }
 #api.open { display: block; }
 #api pre { background: var(--panel); border: 1px solid var(--border); padding: 10px; border-radius: 6px; overflow: auto; font-size: 13px; }
 .hidden { display: none !important; }
+.btn.stop { background: color-mix(in srgb, var(--error) 12%, var(--block)); border-color: var(--error); color: var(--error); }
+.chat { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+.msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; word-break: break-word; }
+.msg.user { align-self: flex-end; background: color-mix(in srgb, var(--primary) 14%, var(--block)); border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border)); }
+.msg.assistant, .msg.system { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); }
+.msg.user .md { white-space: pre-wrap; }
+.msg img { max-width: min(360px, 100%); max-height: 360px; border-radius: 6px; display: block; }
+.msg .md > :first-child { margin-top: 0; } .msg .md > :last-child { margin-bottom: 0; }
+.msg .meta { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.typing::after { content: "\2026"; animation: pulse 1s infinite; }
+.mm { display: flex; flex-direction: column; gap: 6px; }
+.mm .files { display: flex; flex-wrap: wrap; gap: 6px; }
+.mm .thumb { position: relative; width: 64px; height: 64px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--muted); text-align: center; }
+.mm .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.mm .thumb button { position: absolute; top: 1px; right: 1px; border: none; border-radius: 4px; padding: 0 5px; cursor: pointer;
+  background: rgba(0,0,0,.55); color: #fff; font-size: 12px; }
+.mm .bar { display: flex; gap: 6px; align-items: flex-end; }
+.mm textarea { flex: 1; resize: none; max-height: 240px; }
+.mm .icon { border: 1px solid var(--border); background: var(--secondary); color: var(--text); border-radius: 6px; width: 38px; height: 38px;
+  cursor: pointer; font-size: 18px; flex: none; }
+.mm .send { background: var(--primary); border-color: var(--primary); color: #fff; }
+.mm.over { outline: 2px dashed var(--primary); }
 </style>
 </head>
 <body>
@@ -113,7 +136,7 @@ function markdown(src) {
     if (line.startsWith("```")) { flush(); code = []; continue; }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
-    const li = line.match(/^\s*[-*]\s+(.*)$/);
+    const li = line.match(/^\s*(?:[-*]|\d+[.)])\s+(.*)$/);
     if (li) { if (para.length) { const l = list; list = null; flush(); list = l; } (list ??= []).push(li[1]); continue; }
     if (!line.trim()) { flush(); continue; }
     if (list) flush();
@@ -181,7 +204,8 @@ const RENDER = {
     const set = v => { inp.value = v ?? ""; if (multi && !p.interactive) autoGrow(); };
     const autoGrow = () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight + 2, 600) + "px"; };
     inp.addEventListener("input", () => { ev.fire("input"); ev.fire("change"); });
-    inp.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing && (!multi || (p.lines || 1) === 1) && !e.shiftKey) { e.preventDefault(); ev.fire("submit"); } });
+    inp.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing && (!multi || ()GRFE",
+        R"GRFE(p.lines || 1) === 1) && !e.shiftKey) { e.preventDefault(); ev.fire("submit"); } });
     set(p.value);
     return { get: () => inp.value, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
   },
@@ -214,8 +238,7 @@ const RENDER = {
   checkbox(c, parent) {
     const p = c.props, b = el("div", "block", parent), ev = emitter();
     if (p.visible === false) b.classList.add("hidden");
-    if (p.info))GRFE",
-        R"GRFE( el("span", "info", b).textContent = p.info;
+    if (p.info) el("span", "info", b).textContent = p.info;
     const lab = el("label", "check", b), box = el("input", "", lab); box.type = "checkbox"; box.disabled = !p.interactive;
     el("span", "", lab).textContent = p.label || "";
     const set = v => box.checked = !!v;
@@ -239,11 +262,89 @@ const RENDER = {
     let val = c.props.value; set(val);
     return { get: () => val, set: v => { val = v; set(v); }, reset: () => { val = c.props.value; set(val); }, on: emitter().on, loading: withLoading(b) };
   },
+  chatbot(c, parent) {
+    const p = c.props, b = block(c, parent), box = el("div", "chat", b);
+    box.style.height = (p.height || 480) + "px";
+    let val = [];
+    const set = v => {
+      val = Array.isArray(v) ? v : [];
+      const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+      box.innerHTML = "";
+      for (const m of val) {
+        const d = el("div", "msg " + (m.role || "assistant"), box);
+        if (m.metadata && m.metadata.title) el("div", "meta", d).textContent = m.metadata.title;
+        const ct = m.content;
+        if (ct && typeof ct === "object") {
+          const f = ct.file || ct;
+          if ((f.mime_type || "").startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.path || "")) {
+            const img = el("img", "", d); img.src = f.url; img.alt = ct.alt_text || f.orig_name || "";
+          } else { const a = el("a", "filelink", d); a.href = f.url; a.download = f.orig_name || ""; a.textContent = f.orig_name || "file"; }
+        } else {
+          const md = el("div", "md", d);
+          if (m.role === "user") md.textContent = ct ?? "";
+          else if (!ct) md.className = "md typing";
+          else md.innerHTML = markdown(ct);
+        }
+      }
+      if (stick) box.scrollTop = box.scrollHeight;
+    };
+    set(p.value);
+    return { get: () => val, set, reset: () => set(p.value), on: emitter().on, loading: withLoading(b) };
+  },
+  multimodaltextbox(c, parent) {
+    const p = c.props, b = block(c, parent), ev = emitter(), wrap = el("div", "mm", b);
+    const filesRow = el("div", "files", wrap), bar = el("div", "bar", wrap);
+    const picker = el("input", "", wrap); picker.type = "file"; picker.hidden = true; picker.multiple = true;
+    if (p.file_types) picker.accept = p.file_types;
+    const attach = el("button", "icon", bar); attach.type = "button"; attach.textContent = "+"; attach.title = "Attach files";
+    const ta = el("textarea", "", bar); ta.rows = 1; ta.placeholder = p.placeholder || "";
+    const send = el("button", "icon send", bar); send.type = "button"; send.textContent = "↑"; send.title = "Send";
+    let files = [];  // {value, pending, url, name, isImage}
+    const grow = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, 240) + "px"; };
+    const draw = () => {
+      filesRow.innerHTML = "";
+      files.forEach((f, i) => {
+        const t = el("div", "thumb", filesRow);
+        if (f.isImage) { const im = el("img", "", t); im.src = f.url; } else t.textContent = f.name;
+        const x = el("button", "", t); x.textContent = "×"; x.onclick = () => { files.splice(i, 1); draw(); };
+      });
+    };
+    const add = list => {
+      for (const file of list) {
+        const f = { name: file.name, url: URL.createObjectURL(file), isImage: file.type.startsWith("image/"), value: null };
+        f.pending = upload(file).then(v => (f.value = v))
+          .catch(e => { toast("Error", e.message); files = files.filter(x => x !== f); draw(); return null; });
+        files.push(f);
+      }
+      draw();
+    };
+    const set = v => {
+      ta.value = (v && v.text) || ""; grow();
+      files = ((v && v.files) || []).filter(Boolean).map(fd => ({ name: fd.orig_name, url: fd.url, value: fd,
+        isImage: (fd.mime_type || "").startsWith("image/"), pending: null }));
+      draw();
+    };
+    const get = async () => {
+      const vals = await Promise.all(files.map(f => f.pending || f.value));
+      return { text: ta.value, files: vals.filter(Boolean) };
+    };
+    attach.onclick = () => picker.click();
+    picker.onchange = () => { add(picker.files); picker.value = ""; };
+    send.onclick = () => ev.fire("submit");
+    ta.addEventListener("input", () => { grow(); ev.fire("change"); });
+    ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ev.fire("submit"); } });
+    ta.addEventListener("paste", e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); add(fs); } });
+    wrap.ondragover = e => { e.preventDefault(); wrap.classList.add("over"); };
+    wrap.ondragleave = () => wrap.classList.remove("over");
+    wrap.ondrop = e => { e.preventDefault(); wrap.classList.remove("over"); add(e.dataTransfer.files); };
+    set(p.value);
+    return { get, set, reset: () => set(p.value), on: ev.on, loading: () => {} };
+  },
   button(c, parent) {
     const p = c.props, btn = el("button", "btn " + (p.variant || "secondary"), parent), ev = emitter();
     btn.textContent = p.value; if (p.visible === false) btn.classList.add("hidden");
     btn.addEventListener("click", () => ev.fire("click"));
-    return { get: () => p.value, set: v => btn.textContent = v, reset: () => {}, on: ev.on, loading: () => {} };
+    return { el: btn, get: () => p.value, set: v => btn.textContent = v, reset: () => {}, on: ev.on, loading: () => {} };
   },
   clearbutton(c, parent) {
     const p = c.props, btn = el("button", "btn " + (p.variant || "secondary"), parent), ev = emitter();
@@ -323,16 +424,37 @@ async function readSSE(resp, cb) {
   }
 }
 
+const running = {};  // dep id -> Set of AbortControllers
+
+// Buttons wi)GRFE",
+        R"GRFE(th `cancels` (e.g. Stop) are shown only while their events run.
+function updateCancelButtons() {
+  for (const c of CFG.components) {
+    const cancels = c.props.cancels;
+    if (!cancels || !comps[c.id]?.el) continue;
+    const busy = cancels.some(id => running[id]?.size);
+    comps[c.id].el.classList.toggle("hidden", !busy && c.props.visible === false);
+  }
+}
+
 async function run(dep) {
+  if (!dep.backend_fn) {
+    for (const id of dep.cancels || []) for (const ac of running[id] || []) ac.abort();
+    return;
+  }
   const outs = dep.outputs.map(id => comps[id]).filter(Boolean);
+  const ac = new AbortController();
+  (running[dep.id] ??= new Set()).add(ac);
+  updateCancelButtons();
   outs.forEach(c => c.loading(true));
+  let ok = false;
   try {
     const data = await Promise.all(dep.inputs.map(id => comps[id].get()));
     const r = await fetch(`gradio_api/call/${encodeURIComponent(dep.api_name)}`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data }) });
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data }), signal: ac.signal });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
     const { event_id } = await r.json();
-    const s = await fetch(`gradio_api/call/${encodeURIComponent(dep.api_name)}/${event_id}`);
+    const s = await fetch(`gradio_api/call/${encodeURIComponent(dep.api_name)}/${event_id}`, { signal: ac.signal });
     if (!s.ok) throw new Error(`HTTP ${s.status}`);
     let error = null;
     await readSSE(s, (ev, d) => {
@@ -342,11 +464,16 @@ async function run(dep) {
       } else if (ev === "error") error = JSON.parse(d) ?? "error";
     });
     if (error) throw new Error(error);
+    ok = true;
   } catch (e) {
-    toast("Error", e.message);
+    if (e.name !== "AbortError") toast("Error", e.message);
   } finally {
+    running[dep.id].delete(ac);
+    updateCancelButtons();
     outs.forEach(c => c.loading(false));
   }
+  for (const next of CFG.dependencies)
+    if (next.trigger_after === dep.id && (ok || !next.trigger_only_on_success)) run(next);
 }
 
 function apiDocs() {

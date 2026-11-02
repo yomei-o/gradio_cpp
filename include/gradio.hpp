@@ -290,6 +290,72 @@ inline void from_json(const json& j, FileData& f) {
 }
 
 // ---------------------------------------------------------------------------
+// Chat values
+// ---------------------------------------------------------------------------
+
+// One chat message, Gradio's "messages" format. A message holds text or a file.
+struct ChatMessage {
+    std::string role;  // "user" / "assistant" / "system"
+    std::string text;
+    FileData file;
+    json metadata;     // e.g. {"title": "thinking"}; null when unused
+
+    bool is_file() const { return !file.empty(); }
+    static ChatMessage user(std::string t) { return {"user", std::move(t), {}, nullptr}; }
+    static ChatMessage assistant(std::string t) { return {"assistant", std::move(t), {}, nullptr}; }
+    static ChatMessage user_file(FileData f) { return {"user", "", std::move(f), nullptr}; }
+};
+using History = std::vector<ChatMessage>;
+
+inline void to_json(json& j, const ChatMessage& m) {
+    j = json{{"role", m.role}, {"metadata", m.metadata}};
+    if (m.is_file())
+        j["content"] = json{{"file", m.file}, {"alt_text", m.text.empty() ? json(nullptr) : json(m.text)}};
+    else
+        j["content"] = m.text;
+}
+
+inline void from_json(const json& j, ChatMessage& m) {
+    m = ChatMessage{};
+    if (!j.is_object()) throw Error("expected a chat message object");
+    m.role = j.value("role", std::string("user"));
+    if (j.contains("metadata")) m.metadata = j["metadata"];
+    const json& c = j.contains("content") ? j["content"] : json();
+    if (c.is_string()) {
+        m.text = c.get<std::string>();
+    } else if (c.is_object()) {
+        if (c.contains("file")) {
+            m.file = c["file"].get<FileData>();
+            if (c.contains("alt_text") && c["alt_text"].is_string()) m.text = c["alt_text"].get<std::string>();
+        } else if (c.contains("path")) {
+            m.file = c.get<FileData>();
+        }
+    }
+}
+
+// Value of a MultimodalTextbox: text plus attached files.
+struct MultimodalValue {
+    std::string text;
+    std::vector<FileData> files;
+    bool empty() const { return text.empty() && files.empty(); }
+};
+
+inline void to_json(json& j, const MultimodalValue& v) { j = json{{"text", v.text}, {"files", v.files}}; }
+
+inline void from_json(const json& j, MultimodalValue& v) {
+    v = MultimodalValue{};
+    if (j.is_null()) return;
+    if (j.is_string()) {
+        v.text = j.get<std::string>();
+        return;
+    }
+    if (!j.is_object()) throw Error("expected {\"text\": ..., \"files\": [...]}");
+    if (j.contains("text") && j["text"].is_string()) v.text = j["text"].get<std::string>();
+    if (j.contains("files") && j["files"].is_array())
+        for (auto& f : j["files"]) v.files.push_back(f.get<FileData>());
+}
+
+// ---------------------------------------------------------------------------
 // Components
 // ---------------------------------------------------------------------------
 struct Component {
@@ -316,6 +382,9 @@ struct Component {
 inline bool is_file_type(const std::string& t) {
     return t == "image" || t == "file" || t == "audio" || t == "video";
 }
+
+// Components whose value nests files somewhere inside.
+inline bool has_nested_files(const std::string& t) { return t == "chatbot" || t == "multimodaltextbox"; }
 
 inline Component Textbox(const std::string& label = "", int lines = 1, const std::string& placeholder = "",
                          const std::string& value = "") {
@@ -355,6 +424,19 @@ inline Component JSON(const std::string& label = "") {
 
 inline Component Button(const std::string& text = "Run", const std::string& variant = "secondary") {
     return Component("button", {{"value", text}, {"variant", variant}});
+}
+
+inline Component Chatbot(const std::string& label = "Chatbot", int height = 480) {
+    return Component("chatbot", {{"label", label}, {"value", json::array()}, {"type", "messages"}, {"height", height}});
+}
+
+inline Component MultimodalTextbox(const std::string& label = "", const std::string& placeholder = "Type a message...",
+                                   const std::string& accept = "image/*") {
+    return Component("multimodaltextbox", {{"label", label},
+                                           {"show_label", !label.empty()},
+                                           {"placeholder", placeholder},
+                                           {"file_types", accept},
+                                           {"value", {{"text", ""}, {"files", json::array()}}}});
 }
 
 // Resets the given components to their initial values (browser only).
@@ -521,9 +603,10 @@ public:
     template <class Body>
     int column(Body body) { return container("column", body); }
 
+    // Register an event handler; returns the event id (for then() / cancel()).
     template <class F>
-    Blocks& on(std::vector<std::pair<int, std::string>> targets, F fn, std::vector<int> inputs,
-               std::vector<int> outputs, EventOptions opt = {}) {
+    int on(std::vector<std::pair<int, std::string>> targets, F fn, std::vector<int> inputs,
+           std::vector<int> outputs, EventOptions opt = {}) {
         Dep d;
         d.targets = std::move(targets);
         d.inputs = std::move(inputs);
@@ -536,19 +619,34 @@ public:
         d.show_api = opt.show_api;
         if (opt.concurrency_limit > 0) d.sem = std::make_shared<detail::Semaphore>(opt.concurrency_limit);
         deps_.push_back(std::move(d));
-        return *this;
+        return (int)deps_.size() - 1;
     }
     template <class F>
-    Blocks& click(int trigger, F fn, std::vector<int> inputs, std::vector<int> outputs, const std::string& api_name = "") {
+    int click(int trigger, F fn, std::vector<int> inputs, std::vector<int> outputs, const std::string& api_name = "") {
         return on({{trigger, "click"}}, std::move(fn), std::move(inputs), std::move(outputs), {api_name});
     }
     template <class F>
-    Blocks& submit(int trigger, F fn, std::vector<int> inputs, std::vector<int> outputs, const std::string& api_name = "") {
+    int submit(int trigger, F fn, std::vector<int> inputs, std::vector<int> outputs, const std::string& api_name = "") {
         return on({{trigger, "submit"}}, std::move(fn), std::move(inputs), std::move(outputs), {api_name});
     }
     template <class F>
-    Blocks& change(int trigger, F fn, std::vector<int> inputs, std::vector<int> outputs, const std::string& api_name = "") {
+    int change(int trigger, F fn, std::vector<int> inputs, std::vector<int> outputs, const std::string& api_name = "") {
         return on({{trigger, "change"}}, std::move(fn), std::move(inputs), std::move(outputs), {api_name});
+    }
+    // Run after event `after` finishes successfully (like Gradio's .then / .success).
+    template <class F>
+    int then(int after, F fn, std::vector<int> inputs, std::vector<int> outputs, EventOptions opt = {}) {
+        int id = on({}, std::move(fn), std::move(inputs), std::move(outputs), std::move(opt));
+        deps_[id].trigger_after = after;
+        return id;
+    }
+    // Clicking `trigger` aborts the running events (Gradio's cancels=[...]).
+    int cancel(int trigger, std::vector<int> events, const std::string& event = "click") {
+        Dep d;
+        d.targets = {{trigger, event}};
+        d.cancels = std::move(events);
+        deps_.push_back(std::move(d));
+        return (int)deps_.size() - 1;
     }
 
     void set_mode(const std::string& m) { mode_ = m; }
@@ -574,9 +672,14 @@ public:
             auto& d = deps_[i];
             json targets = json::array();
             for (auto& t : d.targets) targets.push_back({t.first, t.second});
+            bool backend = (bool)d.fn;
             deps.push_back({{"id", i}, {"targets", targets}, {"inputs", d.inputs}, {"outputs", d.outputs},
-                            {"api_name", d.api_name}, {"backend_fn", true}, {"js", nullptr},
-                            {"queue", true}, {"show_api", d.show_api}, {"types", {{"generator", d.streaming}}}});
+                            {"api_name", backend ? json(d.api_name) : json(nullptr)}, {"backend_fn", backend},
+                            {"js", nullptr}, {"queue", true}, {"show_api", backend && d.show_api},
+                            {"cancels", d.cancels},
+                            {"trigger_after", d.trigger_after < 0 ? json(nullptr) : json(d.trigger_after)},
+                            {"trigger_only_on_success", d.trigger_after >= 0},
+                            {"types", {{"generator", d.streaming}, {"cancel", !backend}}}});
         }
         return {{"version", std::string("gradio_cpp-") + version},
                 {"mode", mode_},
@@ -590,7 +693,7 @@ public:
     json api_info() const {
         json named = json::object();
         for (auto& d : deps_) {
-            if (!d.show_api) continue;
+            if (!d.show_api || !d.fn) continue;
             json params = json::array(), rets = json::array();
             for (int id : d.inputs) params.push_back(param_info(id, true));
             for (int id : d.outputs) rets.push_back(param_info(id, false));
@@ -697,6 +800,8 @@ private:
         bool show_api = true;
         size_t n_args = 0;
         std::shared_ptr<detail::Semaphore> sem;
+        std::vector<int> cancels;
+        int trigger_after = -1;
     };
     struct Event {
         size_t dep = 0;
@@ -743,7 +848,7 @@ private:
 
     const Dep* find_api(const std::string& name) const {
         for (auto& d : deps_)
-            if (d.api_name == name) return &d;
+            if (d.fn && d.api_name == name) return &d;
         return nullptr;
     }
 
@@ -801,22 +906,34 @@ private:
     }
 
     // Reject input files that are neither uploads nor files we handed out.
+    static void check_file(const FileData& f) {
+        if (f.path.empty()) throw Error("file input has no path; upload it to /gradio_api/upload first");
+        if (f.path.rfind("http://", 0) == 0 || f.path.rfind("https://", 0) == 0)
+            throw Error("remote URLs are not supported yet; upload the file to /gradio_api/upload first");
+        if (!detail::Cache::get().allowed(f.path)) throw Error("file not allowed: " + f.path);
+    }
+    // Any object carrying a "path" inside chat / multimodal values is a file reference.
+    static void check_nested(const json& j) {
+        if (j.is_object()) {
+            if (j.contains("path") && j["path"].is_string()) check_file(j.get<FileData>());
+            for (auto& [k, v] : j.items()) check_nested(v);
+        } else if (j.is_array()) {
+            for (auto& v : j) check_nested(v);
+        }
+    }
     void check_input_files(const Dep& d, const json& data) const {
         for (size_t i = 0; i < d.inputs.size() && i < data.size(); ++i) {
             const Component* c = find_comp(d.inputs[i]);
-            if (!c || !is_file_type(c->type) || data[i].is_null()) continue;
-            FileData f = data[i].get<FileData>();
-            if (f.path.empty()) throw Error("file input has no path; upload it to /gradio_api/upload first");
-            if (f.path.rfind("http://", 0) == 0 || f.path.rfind("https://", 0) == 0)
-                throw Error("remote URLs are not supported yet; upload the file to /gradio_api/upload first");
-            if (!detail::Cache::get().allowed(f.path)) throw Error("file not allowed: " + f.path);
+            if (!c || data[i].is_null()) continue;
+            if (is_file_type(c->type)) check_file(data[i].get<FileData>());
+            else if (has_nested_files(c->type)) check_nested(data[i]);
         }
     }
 
     void run_event(const Event& ev, httplib::DataSink& sink) {
         const Dep& d = deps_[ev.dep];
         auto send = [&](const std::string& event, const json& data) {
-            std::string msg = "event: " + event + "\ndata: " + data.dump() + "\n\n";
+            std::string msg = "event: " + event + "\ndata: " + data.dump(-1, ' ', false, json::error_handler_t::replace) + "\n\n";
             if (!sink.write(msg.data(), msg.size())) throw detail::Cancelled{};
         };
         json last = json::array();
@@ -921,6 +1038,108 @@ public:
     void launch(int port) { blocks_.launch(port); }
 
 private:
+    Blocks blocks_;
+};
+
+// ---------------------------------------------------------------------------
+// ChatInterface: Chatbot + input box around fn(message, history) -> reply.
+//
+//   fn's first parameter is std::string (text only) or gr::MultimodalValue
+//   (text + attached files, shows the attach button). The second is
+//   const gr::History& (earlier turns). Return the reply as std::string, or take
+//   a last `const gr::Yield&` and yield the reply so far to stream it.
+// ---------------------------------------------------------------------------
+class ChatInterface {
+public:
+    template <class F>
+    ChatInterface(F fn, const std::string& title = "", const std::string& description = "",
+                  const std::string& placeholder = "Type a message...")
+        : blocks_(title.empty() ? "Chat" : title) {
+        using Args = typename detail::fn_traits<F>::args;
+        static_assert(std::tuple_size_v<Args> >= 2, "fn(message, history[, yield])");
+        using Msg = std::tuple_element_t<0, Args>;
+        static constexpr bool multimodal = std::is_same_v<Msg, MultimodalValue>;
+        static_assert(multimodal || std::is_same_v<Msg, std::string>, "message must be std::string or gr::MultimodalValue");
+
+        blocks_.set_mode("chat_interface");
+        if (!title.empty()) blocks_.add(Markdown("# " + title).set("elem_classes", "title"));
+        if (!description.empty()) blocks_.add(Markdown(description));
+        int chatbot = blocks_.add(Chatbot("Chatbot").set("show_label", false));
+        int box = blocks_.add(multimodal ? MultimodalTextbox("", placeholder)
+                                         : Textbox("", 1, placeholder).set("show_label", false));
+        int stop = -1, clear = -1;
+        blocks_.row([&] {
+            stop = blocks_.add(Button("Stop", "stop").set("visible", false));
+            clear = blocks_.add(ClearButton({chatbot, box}));
+        });
+        (void)clear;
+
+        auto shared = std::make_shared<F>(std::move(fn));
+        // UI event: shows the user's turn at once, clears the box, then streams the reply.
+        int ui = blocks_.on(
+            {{box, "submit"}},
+            [shared](const json& msg, const History& history, const Yield& y) {
+                MultimodalValue m = msg.get<MultimodalValue>();
+                json empty = multimodal ? json{{"text", ""}, {"files", json::array()}} : json("");
+                if (m.empty()) {
+                    y(msg, history);
+                    return;
+                }
+                History shown = history;
+                for (auto& f : m.files) shown.push_back(ChatMessage::user_file(f));
+                if (!m.text.empty()) shown.push_back(ChatMessage::user(m.text));
+                y(empty, shown);
+                History reply = shown;
+                reply.push_back(ChatMessage::assistant(""));
+                std::string text = call(*shared, m, history, [&](const std::string& partial) {
+                    reply.back().text = partial;
+                    y(empty, reply);
+                });
+                reply.back().text = text;
+                y(empty, reply);
+            },
+            {box, chatbot}, {box, chatbot}, {"_chat_ui", 1, false});
+        blocks_.component(stop).set("cancels", json::array({ui}));
+        blocks_.cancel(stop, {ui});
+
+        // API event (Gradio's /chat): message in, reply out, no history.
+        int response = blocks_.add(Textbox("response").set("visible", false));
+        blocks_.on(
+            {},
+            [shared](const json& msg, const Yield& y) {
+                MultimodalValue m = msg.get<MultimodalValue>();
+                std::string text = call(*shared, m, History{}, [&](const std::string& partial) { y(partial); });
+                y(text);
+            },
+            {box}, {response}, {"chat", 1, true});
+    }
+
+    Blocks& blocks() { return blocks_; }
+    void launch(LaunchOptions opt = {}) { blocks_.launch(opt); }
+    void launch(int port) { blocks_.launch(port); }
+
+private:
+    template <class F, class OnPartial>
+    static std::string call(F& fn, const MultimodalValue& m, const History& h, OnPartial on_partial) {
+        using Args = typename detail::fn_traits<F>::args;
+        using Msg = std::tuple_element_t<0, Args>;
+        auto msg = [&]() -> Msg {
+            if constexpr (std::is_same_v<Msg, MultimodalValue>) return m;
+            else return m.text;
+        };
+        if constexpr (detail::last_is_yield<Args>::value) {
+            std::string last;
+            Yield y([&](const json& out) {
+                last = out.empty() ? std::string() : out[0].get<std::string>();
+                on_partial(last);
+            });
+            fn(msg(), h, y);
+            return last;
+        } else {
+            return fn(msg(), h);
+        }
+    }
+
     Blocks blocks_;
 };
 

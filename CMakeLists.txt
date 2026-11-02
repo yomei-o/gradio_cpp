@@ -16,7 +16,7 @@ if(MSVC)
   target_compile_options(gradio_cpp INTERFACE /utf-8 /bigobj)
 endif()
 
-foreach(ex hello sepia blocks)
+foreach(ex hello sepia blocks chat_echo llama_chat)
   add_executable(${ex} examples/${ex}.cpp)
   target_link_libraries(${ex} PRIVATE gradio_cpp)
 endforeach()
