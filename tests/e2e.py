@@ -112,6 +112,33 @@ def main():
                 timeout=300000)
             page.screenshot(path=str(out / "e2e_llm.png"), full_page=True)
             print("llm answer:", last_bot(page))
+        elif which == "components":
+            out = Path(sys.argv[2] if len(sys.argv) > 2 else ".")
+            # radio -> update(choices, label, value) on the dropdown
+            page.get_by_label("vegetable").check()
+            page.wait_for_function("[...document.querySelectorAll('select option')].some(o => o.textContent === 'leek')")
+            page.locator("select").select_option(label="leek")
+            page.get_by_label("pepper").check()
+            page.get_by_role("button", name="Order").click()
+            page.wait_for_function("[...document.querySelectorAll('input[type=text]')].some(i => i.value.includes('leek'))")
+            summary = [i.input_value() for i in page.locator("input[type=text]").all() if "leek" in i.input_value()][0]
+            assert summary == "vegetable: leek +salt +pepper", summary
+            # gallery
+            page.get_by_role("button", name="Gallery").click()
+            page.get_by_role("button", name="Make swatches").click()
+            page.wait_for_function("document.querySelectorAll('.gallery img').length === 4")
+            page.wait_for_function("[...document.querySelectorAll('.gallery img')].every(i => i.complete && i.naturalWidth === 96)")
+            page.screenshot(path=str(out / "e2e_gallery.png"), full_page=True)
+            # visibility via update
+            page.get_by_role("button", name="Visibility").click()
+            secret = page.locator("input[type=text]").filter(has_text="")
+            assert not page.get_by_text("secret", exact=True).is_visible()
+            page.get_by_label("show the secret box").check()
+            page.get_by_text("secret", exact=True).wait_for(state="visible")
+            page.locator("summary", has_text="More").click()
+            page.get_by_text("raw HTML").wait_for(state="visible")
+            page.screenshot(path=str(out / "e2e_components.png"), full_page=True)
+            print("components ok:", summary)
         elif which == "mock":
             out = Path(sys.argv[3] if len(sys.argv) > 3 else ".")
             first, second = chat(page, sys.argv[2], out, "images=[PNG", "second turn")

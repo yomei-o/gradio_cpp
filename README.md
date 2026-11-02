@@ -46,9 +46,10 @@ Ollama や vLLM など、OpenAI 互換のサーバならそのまま使える（
 | | |
 |---|---|
 | `gr::Interface` | 入力・出力・Clear/Submit を自動配置 |
-| `gr::Blocks` | `row()` / `column()` で自由レイアウト、`click` / `submit` / `change` イベント |
+| `gr::Blocks` | `row()` / `column()` / `tabs()`+`tab()` / `accordion()` で自由レイアウト、`click` / `submit` / `change` イベント |
 | `gr::ChatInterface` | `fn(message, history[, yield])` だけでチャット画面。Stop ボタン、`/chat` API 付き |
-| コンポーネント | Textbox, Number, Slider, Checkbox, Image, File, Markdown, JSON, Button, ClearButton, Chatbot（messages 形式）, MultimodalTextbox |
+| コンポーネント | Textbox, Number, Slider, Checkbox, Image, File, Markdown, JSON, Button, ClearButton, Chatbot（messages 形式）, MultimodalTextbox, Dropdown, Radio, CheckboxGroup, Gallery, HTML |
+| `gr::update()` | 値の代わりに返すと、そのコンポーネントの props を変える（`visible`、`choices`、`label` など） |
 | イベント | `then()`（成功後に続けて実行）、`cancel()`（実行中のイベントを止める） |
 | 型付きハンドラ | 引数の型（`std::string`, `double`, `int`, `bool`, `gr::FileData`, `gr::json`）に自動変換。複数出力は `std::tuple` で返す |
 | ストリーミング | 最後の引数を `const gr::Yield&` にすると generator になり、`yield(...)` のたびにブラウザへ送る |
@@ -96,16 +97,25 @@ MSVC では `/utf-8 /bigobj` を付ける（CMake の `gradio_cpp` ターゲッ�
 * `examples/hello.cpp` — Gradio のクイックスタート
 * `examples/sepia.cpp` — 画像を入力してセピア化
 * `examples/blocks.cpp` — Blocks レイアウト、複数出力、ストリーミング
+* `examples/components.cpp` — Tabs / Accordion / Dropdown / Radio / CheckboxGroup / Gallery / `gr::update`
 * `examples/chat_echo.cpp` — LLM なしの ChatInterface（受け取ったものを返す）
 * `examples/llama_chat.cpp` — llama-server につなぐ画像付きチャット
 
 ## テスト
 
-サンプルを起動してから Playwright でブラウザ操作を確かめる：
+全部まとめて（各サンプルを起動 → Playwright で操作 → 停止）：
+
+```sh
+bash tests/run_all.sh some.png                                  # build/Release の exe を使う
+LLM=http://127.0.0.1:8081 bash tests/run_all.sh some.png        # 本物の llama-server も
+```
+
+個別に、サンプルを起動してから：
 
 ```sh
 python tests/e2e.py sepia some.png
 python tests/e2e.py blocks
+python tests/e2e.py components
 python tests/e2e.py echo some.png      # chat_echo を起動しておく
 python tests/e2e.py stop               # chat_echo：Stop で止まるか
 python tests/mock_openai.py 8080 &     # 画像の中身まで返すモック LLM

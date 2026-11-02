@@ -34,9 +34,14 @@
 * 本物：llama.cpp b12032 の win-cpu-arm64 版 llama-server と SmolVLM2-500M-Video-Instruct-Q8_0（＋mmproj）で、
   画像を説明する返事が返った。バイナリとモデルは `C:\prog\llama_cpp`（リポの外）に置いてある。
 
+2026-11-02 v0.3（部品）
+* Dropdown / Radio / CheckboxGroup / Gallery / HTML、Tabs / Accordion、`gr::update`。
+  フロントでは、visible と value はその場で書き換え、それ以外の props は描き直す。イベントの購読はコンポーネント id ごとに
+  持っているので、描き直しても消えない。
+* `tests/run_all.sh` で7本（sepia, blocks, components, echo, stop, mock, llm）すべて PASS。
+
 ## 次にやること
 
-1. `gr::update`（visible や value の部分更新）、Dropdown / Radio、Tabs / Accordion、Gallery。
-2. `gradio_client` 互換（`/gradio_api/queue/join` と `/gradio_api/queue/data` の sse_v3、`/gradio_api/info`
+1. `gradio_client` 互換（`/gradio_api/queue/join` と `/gradio_api/queue/data` の sse_v3、`/gradio_api/info`
    の細部）。Python の gradio_client から本当に呼んで確かめる。
-3. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。
+2. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

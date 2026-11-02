@@ -383,8 +383,14 @@ inline bool is_file_type(const std::string& t) {
     return t == "image" || t == "file" || t == "audio" || t == "video";
 }
 
+inline bool is_layout_type(const std::string& t) {
+    return t == "row" || t == "column" || t == "tabs" || t == "tabitem" || t == "accordion";
+}
+
 // Components whose value nests files somewhere inside.
-inline bool has_nested_files(const std::string& t) { return t == "chatbot" || t == "multimodaltextbox"; }
+inline bool has_nested_files(const std::string& t) {
+    return t == "chatbot" || t == "multimodaltextbox" || t == "gallery";
+}
 
 inline Component Textbox(const std::string& label = "", int lines = 1, const std::string& placeholder = "",
                          const std::string& value = "") {
@@ -437,6 +443,77 @@ inline Component MultimodalTextbox(const std::string& label = "", const std::str
                                            {"placeholder", placeholder},
                                            {"file_types", accept},
                                            {"value", {{"text", ""}, {"files", json::array()}}}});
+}
+
+inline json choice_pairs(const std::vector<std::string>& choices) {
+    json a = json::array();
+    for (auto& c : choices) a.push_back({c, c});
+    return a;
+}
+
+// value: a choice (or a list of them with multiselect); null for none.
+inline Component Dropdown(const std::string& label, const std::vector<std::string>& choices, json value = nullptr,
+                          bool multiselect = false) {
+    if (value.is_null() && multiselect) value = json::array();
+    return Component("dropdown", {{"label", label}, {"choices", choice_pairs(choices)}, {"value", value},
+                                  {"multiselect", multiselect}});
+}
+
+inline Component Radio(const std::string& label, const std::vector<std::string>& choices, json value = nullptr) {
+    return Component("radio", {{"label", label}, {"choices", choice_pairs(choices)}, {"value", value}});
+}
+
+inline Component CheckboxGroup(const std::string& label, const std::vector<std::string>& choices,
+                               std::vector<std::string> value = {}) {
+    return Component("checkboxgroup", {{"label", label}, {"choices", choice_pairs(choices)}, {"value", value}});
+}
+
+inline Component HTML(const std::string& html = "") {
+    return Component("html", {{"value", html}, {"show_label", false}});
+}
+
+inline Component Gallery(const std::string& label = "", int columns = 3) {
+    return Component("gallery", {{"label", label}, {"value", json::array()}, {"columns", columns}});
+}
+
+// One Gallery entry (Gradio's GalleryImage).
+struct GalleryItem {
+    FileData image;
+    std::string caption;
+};
+inline void to_json(json& j, const GalleryItem& g) {
+    j = json{{"image", g.image}, {"caption", g.caption.empty() ? json(nullptr) : json(g.caption)}};
+}
+inline void from_json(const json& j, GalleryItem& g) {
+    g = GalleryItem{};
+    if (j.is_object() && j.contains("image")) {
+        g.image = j["image"].get<FileData>();
+        if (j.contains("caption") && j["caption"].is_string()) g.caption = j["caption"].get<std::string>();
+    } else {
+        g.image = j.get<FileData>();
+    }
+}
+
+// Return in place of a value to change a component's props (Gradio's gr.update):
+//   return gr::update().visible(false);   return gr::update("new text").label("x");
+struct Update {
+    json props = json::object();
+    Update& set(const std::string& k, json v) {
+        props[k] = std::move(v);
+        return *this;
+    }
+    Update& value(json v) { return set("value", std::move(v)); }
+    Update& visible(bool b) { return set("visible", b); }
+    Update& interactive(bool b) { return set("interactive", b); }
+    Update& label(const std::string& s) { return set("label", s); }
+    Update& placeholder(const std::string& s) { return set("placeholder", s); }
+    Update& choices(const std::vector<std::string>& c) { return set("choices", choice_pairs(c)); }
+};
+inline Update update() { return Update{}; }
+inline Update update(json value) { return Update{}.value(std::move(value)); }
+inline void to_json(json& j, const Update& u) {
+    j = u.props;
+    j["__type__"] = "update";
 }
 
 // Resets the given components to their initial values (browser only).
@@ -602,6 +679,15 @@ public:
     int row(Body body) { return container("row", body); }
     template <class Body>
     int column(Body body) { return container("column", body); }
+    // tabs([&]{ tab("A", [&]{...}); tab("B", [&]{...}); })
+    template <class Body>
+    int tabs(Body body) { return container("tabs", body); }
+    template <class Body>
+    int tab(const std::string& label, Body body) { return container("tabitem", body, {{"label", label}}); }
+    template <class Body>
+    int accordion(const std::string& label, Body body, bool open = true) {
+        return container("accordion", body, {{"label", label}, {"open", open}});
+    }
 
     // Register an event handler; returns the event id (for then() / cancel()).
     template <class F>
@@ -661,7 +747,7 @@ public:
         comps.push_back({{"id", 0}, {"type", "form"}, {"props", json::object()}});
         for (auto& c : comps_) {
             json props = c.props;
-            if (!props.contains("interactive") && c.type != "row" && c.type != "column")
+            if (!props.contains("interactive") && !is_layout_type(c.type))
                 props["interactive"] = !(as_output.count(c.id) && !as_input.count(c.id));
             if (!props.contains("visible")) props["visible"] = true;
             props["name"] = c.type;
@@ -810,8 +896,8 @@ private:
     };
 
     template <class Body>
-    int container(const std::string& type, Body& body) {
-        int id = add(Component(type));
+    int container(const std::string& type, Body& body, json props = json::object()) {
+        int id = add(Component(type, std::move(props)));
         children_[id];
         stack_.push_back(id);
         try {

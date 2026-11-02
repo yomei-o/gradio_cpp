@@ -83,6 +83,27 @@ footer a { color: var(--muted); cursor: pointer; }
 #api.open { display: block; }
 #api pre { background: var(--panel); border: 1px solid var(--border); padding: 10px; border-radius: 6px; overflow: auto; font-size: 13px; }
 .hidden { display: none !important; }
+.tabs { display: flex; flex-direction: column; gap: 12px; }
+.tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tabbar button { font: inherit; background: none; border: 1px solid transparent; border-bottom: none; padding: 6px 14px;
+  cursor: pointer; color: var(--muted); border-radius: 6px 6px 0 0; margin-bottom: -1px; }
+.tabbar button.sel { color: var(--text); border-color: var(--border); background: var(--bg); font-weight: 600; }
+.tabitem { display: flex; flex-direction: column; gap: 16px; }
+details.accordion { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; }
+details.accordion > summary { cursor: pointer; font-weight: 600; }
+details.accordion > .inner { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; }
+select { width: 100%; font: inherit; color: var(--text); background: var(--input); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; }
+.choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.choices label { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 10px; cursor: pointer; background: var(--panel); }
+.choices input { accent-color: var(--primary); }
+.gallery { display: grid; gap: 8px; }
+.gallery figure { margin: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--panel); }
+.gallery img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; cursor: zoom-in; }
+.gallery figcaption { font-size: 12px; padding: 4px 6px; color: var(--muted); }
+#lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: flex; align-items: center; justify-content: center; z-index: 20; cursor: zoom-out; }
+#lightbox img { max-width: 95vw; max-height: 95vh; }
 .btn.stop { background: color-mix(in srgb, var(--error) 12%, var(--block)); border-color: var(--error); color: var(--error); }
 .chat { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
 .msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; word-break: break-word; }
@@ -155,15 +176,20 @@ function toast(title, msg) {
   t.onclick = () => t.remove();
 }
 
-function emitter() {
+const emitters = {};
+function emitter(id) {
+  if (id != null && emitters[id]) return emitters[id];
   const h = {};
-  return { on: (ev, f) => (h[ev] ??= []).push(f), fire: ev => (h[ev] || []).forEach(f => f()) };
+  const e = { on: (ev, f) => (h[ev] ??= []).push(f), fire: ev => (h[ev] || []).forEach(f => f()) };
+  if (id != null) emitters[id] = e;
+  return e;
 }
 
 function block(c, parent) {
   const b = el("div", "block", parent);
   if (c.props.elem_id) b.id = c.props.elem_id;
-  if (c.props.visible === false) b.classList.add("hidden");
+  if (c.props.visible === false) b.classList.add("hidde)GRFE",
+        R"GRFE(n");
   if (c.props.show_label !== false && c.props.label) el("span", "label", b).textContent = c.props.label;
   if (c.props.info) el("span", "info", b).textContent = c.props.info;
   return b;
@@ -195,7 +221,7 @@ async function upload(file) {
 
 const RENDER = {
   textbox(c, parent) {
-    const b = block(c, parent), ev = emitter(), p = c.props;
+    const b = block(c, parent), ev = emitter(c.id), p = c.props;
     const multi = (p.lines || 1) > 1 || (!p.interactive && (p.max_lines || 1) > 1);
     const inp = el(multi ? "textarea" : "input", "", b);
     if (multi) inp.rows = p.lines || 1; else inp.type = "text";
@@ -204,13 +230,12 @@ const RENDER = {
     const set = v => { inp.value = v ?? ""; if (multi && !p.interactive) autoGrow(); };
     const autoGrow = () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight + 2, 600) + "px"; };
     inp.addEventListener("input", () => { ev.fire("input"); ev.fire("change"); });
-    inp.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing && (!multi || ()GRFE",
-        R"GRFE(p.lines || 1) === 1) && !e.shiftKey) { e.preventDefault(); ev.fire("submit"); } });
+    inp.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing && (!multi || (p.lines || 1) === 1) && !e.shiftKey) { e.preventDefault(); ev.fire("submit"); } });
     set(p.value);
     return { get: () => inp.value, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
   },
   number(c, parent) {
-    const b = block(c, parent), ev = emitter(), p = c.props;
+    const b = block(c, parent), ev = emitter(c.id), p = c.props;
     const inp = el("input", "", b); inp.type = "number"; inp.step = p.step ?? "any"; inp.readOnly = !p.interactive;
     if (p.minimum != null) inp.min = p.minimum; if (p.maximum != null) inp.max = p.maximum;
     const set = v => inp.value = v ?? "";
@@ -220,7 +245,7 @@ const RENDER = {
     return { get: () => inp.value === "" ? null : Number(inp.value), set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
   },
   slider(c, parent) {
-    const p = c.props, b = el("div", "block", parent), ev = emitter();
+    const p = c.props, b = el("div", "block", parent), ev = emitter(c.id);
     if (p.visible === false) b.classList.add("hidden");
     const head = el("div", "slider-head", b);
     el("span", "label", head).textContent = p.label || "";
@@ -236,7 +261,7 @@ const RENDER = {
     return { get: () => Number(num.value), set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
   },
   checkbox(c, parent) {
-    const p = c.props, b = el("div", "block", parent), ev = emitter();
+    const p = c.props, b = el("div", "block", parent), ev = emitter(c.id);
     if (p.visible === false) b.classList.add("hidden");
     if (p.info) el("span", "info", b).textContent = p.info;
     const lab = el("label", "check", b), box = el("input", "", lab); box.type = "checkbox"; box.disabled = !p.interactive;
@@ -254,13 +279,13 @@ const RENDER = {
     if (p.visible === false) b.classList.add("hidden");
     const set = v => d.innerHTML = markdown(v);
     set(p.value);
-    return { get: () => p.value, set: v => { p.value = v; set(v); }, reset: () => {}, on: emitter().on, loading: withLoading(b) };
+    return { get: () => p.value, set: v => { p.value = v; set(v); }, reset: () => {}, on: emitter(c.id).on, loading: withLoading(b) };
   },
   json(c, parent) {
     const b = block(c, parent), pre = el("pre", "json", b);
     const set = v => pre.textContent = v == null ? "" : JSON.stringify(v, null, 2);
     let val = c.props.value; set(val);
-    return { get: () => val, set: v => { val = v; set(v); }, reset: () => { val = c.props.value; set(val); }, on: emitter().on, loading: withLoading(b) };
+    return { get: () => val, set: v => { val = v; set(v); }, reset: () => { val = c.props.value; set(val); }, on: emitter(c.id).on, loading: withLoading(b) };
   },
   chatbot(c, parent) {
     const p = c.props, b = block(c, parent), box = el("div", "chat", b);
@@ -289,10 +314,10 @@ const RENDER = {
       if (stick) box.scrollTop = box.scrollHeight;
     };
     set(p.value);
-    return { get: () => val, set, reset: () => set(p.value), on: emitter().on, loading: withLoading(b) };
+    return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
   },
   multimodaltextbox(c, parent) {
-    const p = c.props, b = block(c, parent), ev = emitter(), wrap = el("div", "mm", b);
+    const p = c.props, b = block(c, parent), ev = emitter(c.id), wrap = el("div", "mm", b);
     const filesRow = el("div", "files", wrap), bar = el("div", "bar", wrap);
     const picker = el("input", "", wrap); picker.type = "file"; picker.hidden = true; picker.multiple = true;
     if (p.file_types) picker.accept = p.file_types;
@@ -340,22 +365,79 @@ const RENDER = {
     set(p.value);
     return { get, set, reset: () => set(p.value), on: ev.on, loading: () => {} };
   },
+  dropdown(c, parent) {
+    const p = c.props, b = block(c, parent), ev = emitter(c.id);
+    const sel = el("select", "", b); sel.multiple = !!p.multiselect; sel.disabled = !p.interactive;
+    const fill = () => {
+      sel.innerHTML = "";
+      if (!p.multiselect) { const o = el("option", "", sel); o.value = ""; o.textContent = ""; o.dataset.none = "1"; }
+      for (const [label, value] of p.choices || []) { const o = el("option", "", sel); o.value = JSON.stringify(value); o.textContent = label; }
+    };
+    const get = () => p.multiselect ? [...sel.selectedOptions].map(o => JSON.parse(o.value))
+      : (sel.value === "" ? null : JSON.parse(sel.value));
+    const set = v => { const vs = (p.multiselect ? (v || []) : [v]).map(x => JSON.stringify(x));
+      for (const o of sel.options) o.selected = !o.dataset.none && vs.includes(o.value); if (!p.multiselect && v == null) sel.value = ""; };
+    fill(); set(p.value);
+    sel.addEventListener("change", () => { ev.fire("input"); ev.fire("change"); ev.fire("select"); });
+    return { get, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
+  },
+  radio(c, parent) { return choiceGroup(c, parent, false); },
+  checkboxgroup(c, parent) { return choiceGroup(c, parent, true); },
+  html(c, parent) {
+    const p = c.props, b = el("div", "block plain", parent), d = el("div", "", b);
+    if (p.visible === false) b.classList.add("hidden");
+    let val = p.value; const set = v => { val = v; d.innerHTML = v ?? ""; };
+    set(val);
+    return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
+  },
+  gallery(c, parent) {
+    const p = c.props, b = block(c, parent), g = el("div", "gallery", b);
+    g.style.gridTemplateColumns = `repeat(${p.columns || 3}, minmax(0, 1fr))`;
+    let val = [];
+    const set = v => {
+      val = Array.isArray(v) ? v : []; g.innerHTML = "";
+      for (const item of val) {
+        const f = (item && item.image) || item; if (!f) continue;
+        const fig = el("figure", "", g), img = el("img", "", fig); img.src = f.url; img.alt = item.caption || f.orig_name || "";
+        img.onclick = () => { const lb = el("div", "", document.body); )GRFE",
+        R"GRFE(lb.id = "lightbox"; el("img", "", lb).src = f.url; lb.onclick = () => lb.remove(); };
+        if (item.caption) el("figcaption", "", fig).textContent = item.caption;
+      }
+    };
+    set(p.value);
+    return { get: () => val, set, reset: () => set(p.value), on: emitter(c.id).on, loading: withLoading(b) };
+  },
   button(c, parent) {
-    const p = c.props, btn = el("button", "btn " + (p.variant || "secondary"), parent), ev = emitter();
+    const p = c.props, btn = el("button", "btn " + (p.variant || "secondary"), parent), ev = emitter(c.id);
     btn.textContent = p.value; if (p.visible === false) btn.classList.add("hidden");
     btn.addEventListener("click", () => ev.fire("click"));
     return { el: btn, get: () => p.value, set: v => btn.textContent = v, reset: () => {}, on: ev.on, loading: () => {} };
   },
   clearbutton(c, parent) {
-    const p = c.props, btn = el("button", "btn " + (p.variant || "secondary"), parent), ev = emitter();
+    const p = c.props, btn = el("button", "btn " + (p.variant || "secondary"), parent), ev = emitter(c.id);
     btn.textContent = p.value;
     btn.addEventListener("click", () => { for (const id of p.components || []) comps[id]?.reset(); ev.fire("click"); });
     return { get: () => p.value, set: v => btn.textContent = v, reset: () => {}, on: ev.on, loading: () => {} };
   },
 };
 
+function choiceGroup(c, parent, multi) {
+  const p = c.props, b = block(c, parent), ev = emitter(c.id), box = el("div", "choices", b);
+  const name = "r" + c.id + "_" + Math.random().toString(36).slice(2);
+  const inputs = [];
+  for (const [label, value] of p.choices || []) {
+    const l = el("label", "", box), i = el("input", "", l); i.type = multi ? "checkbox" : "radio"; i.name = name;
+    i.disabled = !p.interactive; i._v = value; el("span", "", l).textContent = label; inputs.push(i);
+    i.addEventListener("change", () => { ev.fire("input"); ev.fire("change"); ev.fire("select"); });
+  }
+  const get = () => multi ? inputs.filter(i => i.checked).map(i => i._v) : (inputs.find(i => i.checked)?._v ?? null);
+  const set = v => { const vs = multi ? (v || []) : [v]; inputs.forEach(i => i.checked = vs.includes(i._v)); };
+  set(p.value);
+  return { get, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
+}
+
 function fileLike(c, parent, isImage) {
-  const p = c.props, b = block(c, parent), ev = emitter();
+  const p = c.props, b = block(c, parent), ev = emitter(c.id);
   const drop = el("div", "drop" + (p.interactive ? "" : " static"), b);
   let value = null, pending = null;
   const picker = el("input", "", b); picker.type = "file"; picker.hidden = true;
@@ -388,19 +470,77 @@ function fileLike(c, parent, isImage) {
   return { get: () => pending || value, set, reset: () => set(p.value), on: ev.on, loading: withLoading(b) };
 }
 
+const roots = {};    // id -> root DOM element
+const CBY = {};      // id -> component config (props kept current by updates)
+
+function renderOne(c, parent) {
+  const r = RENDER[c.type];
+  if (!r) { const b = el("div", "block", parent); b.textContent = `[unsupported component: ${c.type}]`; return; }
+  const before = parent.lastChild;
+  comps[c.id] = r(c, parent);
+  roots[c.id] = parent.lastChild !== before ? parent.lastChild : null;
+}
+
 function build(node, parent, byId) {
   for (const ch of node.children || []) {
     const c = byId[ch.id];
+    CBY[c.id] = c;
     if (c.type === "row" || c.type === "column") {
       const d = el("div", c.type, parent);
+      roots[c.id] = d;
       if (c.props.visible === false) d.classList.add("hidden");
       build(ch, d, byId);
-      continue;
+    } else if (c.type === "tabs") {
+      const d = el("div", "tabs", parent), bar = el("div", "tabbar", d);
+      roots[c.id] = d;
+      const items = [];
+      for (const t of ch.children || []) {
+        const tc = byId[t.id]; CBY[tc.id] = tc;
+        const btn = el("button", "", bar); btn.type = "button"; btn.textContent = tc.props.label || "";
+        const pane = el("div", "tabitem", d); roots[tc.id] = pane;
+        build(t, pane, byId);
+        items.push([btn, pane]);
+      }
+      const pick = i => items.forEach(([btn, pane], k) => { btn.classList.toggle("sel", k === i); pane.classList.toggle("hidden", k !== i); });
+      items.forEach(([btn], i) => btn.onclick = () => pick(i));
+      pick(0);
+    } else if (c.type === "accordion") {
+      const d = el("details", "accordion", parent); d.open = c.props.open !== false;
+      roots[c.id] = d;
+      el("summary", "", d).textContent = c.props.label || "";
+      build(ch, el("div", "inner", d), byId);
+    } else {
+      renderOne(c, parent);
     }
-    const r = RENDER[c.type];
-    if (!r) { const b = el("div", "block", parent); b.textContent = `[unsupported component: ${c.type}]`; continue; }
-    comps[c.id] = r(c, parent);
   }
+}
+
+// Apply a gr.update dict: visible/value in place, anything else re-renders the component.
+function applyUpdate(id, u) {
+  const c = CBY[id]; if (!c) return;
+  const { __type__, ...props } = u;
+  const others = Object.keys(props).filter(k => k !== "value" && k !== "visible");
+  if (others.length && comps[id] && roots[id]) {
+    let cur = comps[id].get();
+    if (cur instanceof Promise) cur = undefined;
+    Object.assign(c.props, props);
+    const tmp = document.createElement("div");
+    const old = roots[id];
+    const saved = c.props.value;
+    if (!("value" in props) && cur !== undefined) c.props.value = cur;
+    renderOne(c, tmp);
+    c.props.value = saved;
+    if ("value" in props) c.props.value = props.value;
+    old.replaceWith(roots[id]);
+    return;
+  }
+  if ("visible" in props) { c.props.visible = props.visible; roots[id]?.classList.toggle("hidden", !props.visible); }
+  if ("value" in props) comps[id]?.set(props.value);
+}
+
+function setOutput(id, v) {
+  if (v && typeof v === "object" && !Array.isArray(v) && v.__type__ === "update") applyUpdate(id, v);
+  else comps[id]?.set(v);
 }
 
 // Read a Server-Sent Events stream, calling cb(event, data) per message.
@@ -426,8 +566,7 @@ async function readSSE(resp, cb) {
 
 const running = {};  // dep id -> Set of AbortControllers
 
-// Buttons wi)GRFE",
-        R"GRFE(th `cancels` (e.g. Stop) are shown only while their events run.
+// Buttons with `cancels` (e.g. Stop) are shown only while their events run.
 function updateCancelButtons() {
   for (const c of CFG.components) {
     const cancels = c.props.cancels;
@@ -460,7 +599,7 @@ async function run(dep) {
     await readSSE(s, (ev, d) => {
       if (ev === "generating" || ev === "complete") {
         const vals = JSON.parse(d);
-        dep.outputs.forEach((id, i) => { if (i < vals.length) comps[id]?.set(vals[i]); });
+        dep.outputs.forEach((id, i) => { if (i < vals.length) setOutput(id, vals[i]); });
       } else if (ev === "error") error = JSON.parse(d) ?? "error";
     });
     if (error) throw new Error(error);
@@ -503,6 +642,7 @@ async function main() {
   CFG = await (await fetch("config")).json();
   document.title = CFG.title || "Gradio";
   const byId = Object.fromEntries(CFG.components.map(c => [c.id, c]));
+  Object.assign(CBY, byId);
   build(CFG.layout, document.getElementById("app"), byId);
   for (const dep of CFG.dependencies)
     for (const [id, ev] of dep.targets) comps[id]?.on(ev, () => run(dep));
