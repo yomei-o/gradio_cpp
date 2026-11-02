@@ -10,7 +10,9 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-URL = "http://127.0.0.1:7860/"
+import os
+
+URL = os.environ.get("GRADIO_URL", "http://127.0.0.1:7860/")
 
 
 def sepia(page, png, out):
@@ -79,7 +81,7 @@ def main():
         b = p.chromium.launch(args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"])
         page = b.new_page(viewport={"width": 1280, "height": 800})
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(URL)
+        page.goto(URL + ("?__theme=dark" if which == "theme" else ""))
         page.wait_for_selector(".block, form.login")
         if which == "sepia":
             sepia(page, sys.argv[2], Path(sys.argv[3] if len(sys.argv) > 3 else "."))
@@ -249,6 +251,10 @@ def main():
             page.get_by_role("link", name="Logout").click()
             page.wait_for_selector("form.login")
             print("login ok: wrong password refused, app used, logged out")
+        elif which == "theme":  # ?__theme=dark switches the palette
+            bg = page.evaluate("getComputedStyle(document.body).backgroundColor")
+            assert bg == "rgb(11, 15, 25)", bg
+            print("theme ok: dark background", bg)
         elif which == "mock":
             out = Path(sys.argv[3] if len(sys.argv) > 3 else ".")
             first, second = chat(page, sys.argv[2], out, "images=[PNG", "second turn")

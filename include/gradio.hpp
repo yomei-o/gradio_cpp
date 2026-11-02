@@ -245,8 +245,16 @@ struct FileData {
     }
 };
 
+namespace detail {
+// URL prefix when served behind a reverse proxy under a sub-path (LaunchOptions::root_path).
+inline std::string& root_path() {
+    static std::string r;
+    return r;
+}
+}  // namespace detail
+
 inline std::string file_url(const std::string& path) {
-    return "/gradio_api/file=" + detail::url_encode_path(path);
+    return detail::root_path() + "/gradio_api/file=" + detail::url_encode_path(path);
 }
 
 inline void to_json(json& j, const FileData& f) {
@@ -922,6 +930,7 @@ struct LaunchOptions {
     bool auto_port = true;      // try the next ports if busy, like Gradio
     AuthFn auth;                // like launch(auth=...): set to require a login
     std::string auth_message;   // shown on the login page
+    std::string root_path;      // e.g. "/gradio" when a reverse proxy serves the app under that sub-path
 };
 
 // ---------------------------------------------------------------------------
@@ -1116,6 +1125,7 @@ public:
                 {"protocol", "sse_v3"},
                 {"connect_heartbeat", false},
                 {"auth_required", (bool)auth_},
+                {"root", detail::root_path()},
                 {"auth_message", auth_message_},
                 {"mode", mode_},
                 {"title", title_},
@@ -1241,6 +1251,8 @@ public:
     void launch(LaunchOptions opt = {}) {
         httplib::Server svr;
         if (opt.auth) set_auth(opt.auth, opt.auth_message);
+        detail::root_path() = opt.root_path;
+        while (!detail::root_path().empty() && detail::root_path().back() == '/') detail::root_path().pop_back();
         mount(svr);
         int port = opt.port;
         int last = opt.auto_port ? port + 99 : port;
@@ -1789,7 +1801,7 @@ private:
                 for (auto it = tokens_.begin(); it != tokens_.end();) it = it->second == u ? tokens_.erase(it) : std::next(it);
             }
             res.set_header("Set-Cookie", cookie_name() + "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
-            res.set_redirect("/");
+            res.set_redirect(detail::root_path() + "/");
         });
     }
 

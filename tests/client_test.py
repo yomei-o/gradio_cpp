@@ -12,7 +12,9 @@ import time
 from gradio_client import Client, handle_file
 from gradio_client.exceptions import AppError
 
-URL = "http://127.0.0.1:7860/"
+import os
+
+URL = os.environ.get("GRADIO_URL", "http://127.0.0.1:7860/")
 
 
 def main():

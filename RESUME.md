@@ -104,6 +104,13 @@
   （`count_plain` で、引数 I より前にある普通の引数の数を数え、それを args の添字にする）。
 * Request は /call では POST 時に、queue では join 時に作る（Cookie ヘッダは入れない）。
 
+2026-11-02 v0.12（root_path、テーマ）
+* `LaunchOptions::root_path`：`file_url()` と `/logout` のリダイレクトに前置、/config の `root`。
+  フロントは元から相対 URL なので、ページを `/gradio/` で開けば動く。
+* テスト用プロキシ `tests/prefix_proxy.py`（先頭のパスを剥がし、レスポンスを chunked で流すので SSE も通る）。
+  Git Bash は `/gradio` のような引数を Windows パスに書き換えるので、`MSYS_NO_PATHCONV=1` が要る。
+* `?__theme=dark|light`。run_all 24本 PASS（プロキシ経由の e2e と gradio_client を含む）。
+
 ## 次にやること
 
 1. libmtmd を直接リンクする llama.cpp サンプル（サーバを別に立てない版）。

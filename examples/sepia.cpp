@@ -3,7 +3,7 @@
 
 #include <algorithm>
 
-int main() {
+int main(int argc, char** argv) {
     gr::Interface demo(
         [](const gr::FileData& img, double strength, const std::string& format) {
             gr::Pixels px = gr::load_pixels(img, 3);
@@ -26,5 +26,8 @@ int main() {
         {gr::Image("input"), gr::Slider("strength (%)", 0, 100, 100), gr::Radio("output format", {"png", "jpeg"}, "png")},
         {gr::Image("sepia"), gr::Textbox("size")},
         "Sepia");
-    demo.launch();
+    gr::LaunchOptions opt;
+    for (int i = 1; i + 1 < argc; i += 2)
+        if (std::string(argv[i]) == "--root-path") opt.root_path = argv[i + 1];  // behind a reverse proxy
+    demo.launch(opt);
 }

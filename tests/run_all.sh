@@ -31,6 +31,19 @@ run extras -- $E2E mic
 run vision -- $E2E vision "$OUT"
 run studio -- $E2E studio "$OUT"
 run login -- $E2E login
+run components -- $E2E theme
+
+# behind a reverse proxy under /gradio (LaunchOptions::root_path)
+MSYS_NO_PATHCONV=1 python tests/prefix_proxy.py 8096 /gradio > "$OUT/proxy.log" 2>&1 &
+PROXY=$!
+PNGW=$(cygpath -m "$PNG" 2>/dev/null || echo "$PNG")
+export MSYS_NO_PATHCONV=1
+GRADIO_URL=http://127.0.0.1:8096/gradio/ run sepia --root-path /gradio -- $E2E sepia "$PNGW" "$OUT"
+if [ -n "${GC_PYTHON:-}" ]; then
+  GRADIO_URL=http://127.0.0.1:8096/gradio/ run sepia --root-path /gradio -- $GC_PYTHON tests/client_test.py sepia "$PNGW"
+fi
+unset MSYS_NO_PATHCONV
+kill $PROXY 2>/dev/null
 run chat_echo -- $E2E echo "$PNG" "$OUT"
 run chat_echo -- $E2E stop
 

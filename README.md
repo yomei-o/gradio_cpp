@@ -97,6 +97,16 @@ gradio_client なら `Client(url, auth=("admin", "secret"))` でそのまま入�
 セッションは HttpOnly の Cookie で持つ。HTTP のままだとパスワードと Cookie は平文で流れるので、
 外に公開するときは HTTPS のリバースプロキシの後ろに置くこと。
 
+### リバースプロキシのサブパスに置く
+
+`https://example.com/gradio/` のように、プロキシがパスの先頭を剥がして転送する構成なら
+`opt.root_path = "/gradio";` を指定する（出力ファイルの URL などにそのパスが付く）。ページは末尾の `/` 付きで開く。
+`tests/prefix_proxy.py` がテスト用の最小のプロキシ。
+
+### テーマ
+
+本家と同じく、URL に `?__theme=dark` / `?__theme=light` を付けると切り替わる（既定は OS の設定に従う）。
+
 ## HTTP API（Gradio と同じパス）
 
 | | |

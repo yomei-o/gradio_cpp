@@ -1009,6 +1009,9 @@ function loginPage(detail) {
 }
 
 async function main() {
+  // ?__theme=dark / ?__theme=light, like Gradio
+  const theme = new URLSearchParams(location.search).get("__theme");
+  if (theme === "dark" || theme === "light") document.documentElement.dataset.theme = theme;
   const rc = await fetch("config");
   if (rc.status === 401) { loginPage((await rc.json().catch(() => ({}))).detail); return; }
   CFG = await rc.json();
