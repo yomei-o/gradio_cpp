@@ -117,8 +117,12 @@
 * llama_chat / llama_local に System prompt / Temperature / Max new tokens。llama_local はビルド機で、
   2ターン目 117ms（KV 再利用は維持）。run_all 25本 PASS。
 
+2026-11-02 v0.14（大きなファイル）
+* アップロードは ContentReader で、受信しながら `Cache::create()` のファイルへ書く。ダウンロードは
+  set_content_provider で 64KB ずつ（httplib が Range を処理するので 206 も返る）。
+* 200MB の往復で、サーバのメモリは 15.8MB → 17.0MB のまま。sha256 一致、Range 1000-1999 も一致。
+
 ## 次にやること
 
 1. Linux（g++ / clang）でのビルドとテスト（Kaggle bridge かビルド機の WSL）。
 2. JS クライアント（@gradio/client）からの呼び出し確認。
-3. 大きなファイルのアップロード・ダウンロードをストリーミングに（今はメモリに全部読む）。

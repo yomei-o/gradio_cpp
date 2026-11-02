@@ -174,6 +174,15 @@ public:
         return u8str(p);
     }
 
+    // A fresh file in the cache for streaming writes; returns its UTF-8 path.
+    std::string create(const std::string& name, std::ofstream& out) {
+        fs::path d = dir_ / random_hex(16);
+        fs::create_directories(d);
+        fs::path p = d / u8path(sanitize_name(name));
+        out.open(p, std::ios::binary);
+        return u8str(p);
+    }
+
     void allow(const std::string& path) {
         std::error_code ec;
         auto c = fs::weakly_canonical(u8path(path), ec);
@@ -1228,13 +1237,37 @@ public:
             });
         });
         mount_queue(svr);
-        svr.Post("/gradio_api/upload", [](const httplib::Request& req, httplib::Response& res) {
-            json paths = json::array();
-            auto range = req.files.equal_range("files");
-            for (auto it = range.first; it != range.second; ++it)
-                paths.push_back(detail::Cache::get().store(it->second.content, it->second.filename));
-            res.set_content(paths.dump(), "application/json");
-        });
+        // Uploads are written to disk as they arrive (no whole-file buffering).
+        svr.Post("/gradio_api/upload",
+                 [](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
+                     if (!req.is_multipart_form_data()) {
+                         res.status = 400;
+                         res.set_content(json{{"detail", "expected multipart/form-data with \"files\""}}.dump(),
+                                         "application/json");
+                         return;
+                     }
+                     json paths = json::array();
+                     std::ofstream out;
+                     bool ok = true;
+                     reader(
+                         [&](const httplib::MultipartFormData& part) {
+                             if (out.is_open()) out.close();
+                             if (part.name != "files") return true;
+                             paths.push_back(detail::Cache::get().create(part.filename, out));
+                             return (bool)out;
+                         },
+                         [&](const char* data, size_t len) {
+                             if (out.is_open()) ok = ok && (bool)out.write(data, (std::streamsize)len);
+                             return ok;
+                         });
+                     if (out.is_open()) out.close();
+                     if (!ok) {
+                         res.status = 500;
+                         res.set_content(json{{"detail", "cannot store upload"}}.dump(), "application/json");
+                         return;
+                     }
+                     res.set_content(paths.dump(), "application/json");
+                 });
         svr.Get(R"(/gradio_api/file=(.+))", [](const httplib::Request& req, httplib::Response& res) {
             std::string p = req.matches[1];
             if (!detail::Cache::get().allowed(p)) {
@@ -1242,11 +1275,23 @@ public:
                 res.set_content(json{{"detail", "file not allowed"}}.dump(), "application/json");
                 return;
             }
-            try {
-                res.set_content(detail::read_file(detail::u8path(p)), detail::guess_mime(p));
-            } catch (const std::exception&) {
-                not_found(res);
-            }
+            // Streamed in 64 KB pieces; httplib serves Range requests (video seeking) from it.
+            fs::path path = detail::u8path(p);
+            std::error_code ec;
+            auto size = fs::file_size(path, ec);
+            if (ec) return not_found(res);
+            auto file = std::make_shared<std::ifstream>(path, std::ios::binary);
+            if (!*file) return not_found(res);
+            res.set_header("Accept-Ranges", "bytes");
+            res.set_content_provider((size_t)size, detail::guess_mime(p),
+                                     [file](size_t offset, size_t length, httplib::DataSink& sink) {
+                                         std::vector<char> buf(std::min<size_t>(length, 64 * 1024));
+                                         file->clear();
+                                         file->seekg((std::streamoff)offset);
+                                         file->read(buf.data(), (std::streamsize)buf.size());
+                                         auto n = (size_t)file->gcount();
+                                         return n > 0 && sink.write(buf.data(), n);
+                                     });
         });
     }
 
